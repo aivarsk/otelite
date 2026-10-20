@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OTELite.io - the garage edition of OTEL</title>
+  <meta name="description" content="A small OTEL backend for test and dev. One process, one SQLite file, one page.">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,700;1,700&display=swap" rel="stylesheet">
+  <style>
+    :root { --ote-blue: #2E6BE6; --lite-amber: #F2A33C; --ink: #17242B; --paper: #F7F6F2; --gray: #8A94A0; }
+    body { font-family: system-ui, sans-serif; color: var(--ink); background: var(--paper); }
+    .mono { font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; }
+    .ote { color: var(--ote-blue); }
+    .lite { color: var(--lite-amber); }
+    .tld { color: var(--gray); }
+    .motto { font-style: italic; }
+    .hero { background: #fff; border-bottom: 1px solid #e8e6e0; }
+    .install { background: var(--ink); color: #e8edee; border-radius: .5rem; }
+    .install pre { color: #e8edee; margin: 0; }
+    .footer { color: var(--gray); }
+    a.navbar-brand { text-decoration: none; }
+  </style>
+</head>
+<body>
+
+<nav class="navbar navbar-expand-lg bg-white border-bottom">
+  <div class="container">
+    <a class="navbar-brand mono fw-bold" href="index.html"><span class="ote">OTE</span><span class="lite">Lite</span><span class="tld">.io</span></a>
+    <div class="navbar-nav ms-auto">
+      <a class="nav-link" href="https://github.com/aivarsk/otelite">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero py-5">
+  <div class="container py-4">
+    <div class="mb-3">
+      <img src="sticker.png" alt="OTELite.io, the loupe logo with the slogan too small, will fail" style="width: 300px; max-width: 80vw;">
+    </div>
+    <p class="lead">The disposable garage edition of OTEL: one process, one SQLite file, one page.</p>
+    <div class="install p-3 mt-3 d-inline-block">
+      <pre class="mono">curl -fsSL https://otelite.io/install.sh | bash</pre>
+    </div>
+    <p class="text-secondary small mt-2">Preview builds land here before the first release.</p>
+  </div>
+</header>
+
+<main class="container py-5">
+  <section class="mb-5">
+    <h2>The observability bill</h2>
+    <p>OTEL instrumentation and the OTLP protocol are free. Somewhere on the way to the backend, that changed: per-seat pricing, ingest quotas, gigabytes of RAM to self-host the usual suspects, a collector pipeline that needs its own team. And the meter runs hardest where telemetry is loudest and least looked at: CI runs, PR environments, dev and test clusters. Every build ships a flood of spans nobody reads, and the bill lands anyway. You wanted traces from your test namespace, not a vendor relationship.</p>
+  </section>
+
+  <section class="mb-5">
+    <h2>How it works</h2>
+    <ol>
+      <li>Point your OTEL SDK or collector at OTELite, OTLP/HTTP on port 4318.</li>
+      <li>Traces and metrics land in one SQLite file. Logs land as JSONL files you grep.</li>
+      <li>Open the single page, pick a time range, see traces, metrics, and logs together.</li>
+    </ol>
+    <p>The files are the API. Your data stays in a directory you own.</p>
+  </section>
+
+  <section class="mb-5">
+    <h2>Small on purpose</h2>
+    <p>OTELite is the disposable OTEL backend. Nothing here is built to last, and that is the feature:</p>
+    <ul>
+      <li>No alerts, no dashboards-as-product, no retention machinery, no high availability.</li>
+      <li>No fsync. If it dies, it dies, and you start a new instance in seconds.</li>
+      <li>When an instance grows too big: seal it, keep it as history, spawn a fresh one.</li>
+    </ul>
+  </section>
+
+  <section class="mb-5">
+    <h2>Where it fits</h2>
+    <p>One OTELite per namespace, per environment, per CI run. Filtering is done by pointing the right exporters at it, not by building query languages. Spin one up for the tests, delete the machines, keep the data directory for inspection.</p>
+  </section>
+</main>
+
+<footer class="footer border-top py-4">
+  <div class="container d-flex justify-content-between">
+    <span>OTELite.io - <a href="https://github.com/aivarsk/otelite">GitHub</a></span>
+    <span class="mono motto">too small, will fail</span>
+  </div>
+</footer>
+
+</body>
+</html>
