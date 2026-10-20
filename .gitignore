@@ -1,0 +1,34 @@
+# Python noise
+__pycache__/
+*.pyc
+
+# tool noise
+.ruff_cache/
+.mypy_cache/
+build_zipapp/
+dist/
+
+# the product is SQLite; your database is not the repo
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# telemetry belongs in the data dir, not in git
+*.log
+.env
+
+# we hear you have a cluster. keep it.
+node_modules/
+
+# editor droppings
+.DS_Store
+.idea/
+.vscode/
+
+# local-only: dev venv, private notes, working memory, phase 3
+generator/.venv/
+private/
+AGENTS.md
+CLAUDE.md
+CONTEXT.md
+*PROFIT*

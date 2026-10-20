@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OTELite.io - the disposable garage edition of OTEL</title>
+<link rel="stylesheet" href="/static/uplot.css">
+<style>
+:root { --ote-blue:#2E6BE6; --lite-amber:#F2A33C; --ink:#17242B; --paper:#F7F6F2; --gray:#8A94A0; }
+* { box-sizing: border-box; }
+body { margin:0; font-family: system-ui, sans-serif; color: var(--ink); background: var(--paper); font-size:14px; }
+.mono { font-family: ui-monospace, Menlo, monospace; }
+header { background:#fff; border-bottom:1px solid #e4e1da; padding:10px 16px; display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
+.brand { font-family: ui-monospace, Menlo, monospace; font-weight:700; font-size:18px; }
+.ote { color: var(--ote-blue); } .lite { color: var(--lite-amber); } .tld { color: var(--gray); }
+.motto { color: var(--gray); font-style: italic; font-size:12px; }
+.ranges button { margin-right:4px; padding:4px 10px; border:1px solid #ccc; background:#fff; border-radius:4px; cursor:pointer; font-size:12px; }
+.ranges button.active { background: var(--ink); color:#fff; border-color: var(--ink); }
+.ranges input { font-size:12px; padding:3px 4px; }
+main { padding: 16px; display: grid; grid-template-columns: 1fr; gap: 16px; }
+section { background:#fff; border:1px solid #e4e1da; border-radius:6px; padding:12px; }
+h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--gray); margin:0 0 10px; cursor:pointer; user-select:none; }
+h2::after { content:" ▾"; font-weight:normal; }
+section.collapsed h2::after { content:" ▸"; }
+section.collapsed > :not(h2) { display:none; }
+h2 .path { color:var(--ote-blue); text-transform:none; letter-spacing:0; font-weight:normal; }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+th, td { text-align:left; padding:4px 8px; border-bottom:1px solid #eee; white-space:nowrap; }
+tbody tr:hover { background:#faf9f6; }
+tbody tr.clickable { cursor:pointer; }
+.err { color:#c0392b; font-weight:600; }
+.warn { color:#b9770e; }
+.dim { color:var(--gray); }
+.bar-row { position:relative; height:18px; min-width:220px; background:#f3f1ec; border-radius:3px; }
+.bar { position:absolute; top:3px; height:12px; background:var(--ote-blue); border-radius:3px; min-width:2px; }
+.bar.error { background:#c0392b; }
+.waterfall { margin-top:10px; }
+.wf-row { display:grid; grid-template-columns:minmax(140px,330px) 1fr 64px; gap:8px; align-items:center; font-size:12px; padding:1px 0; }
+.wf-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.wf-lane { position:relative; height:14px; background:#f3f1ec; border-radius:3px; background-image:linear-gradient(to right, #e8e4dc 1px, transparent 1px); background-size:20% 100%; }
+.wf-tick-lane { height:12px; background:none; }
+.wf-tick { position:absolute; top:0; font-size:10px; color:#8A94A0; transform:translateX(2px); white-space:nowrap; }
+#trace-scatter svg { display:block; margin-bottom:6px; touch-action:none; user-select:none; }
+.tdot { cursor:pointer; }
+.wf-bar { position:absolute; top:2px; height:10px; background:var(--ote-blue); border-radius:3px; min-width:2px; }
+.wf-bar.error { background:#c0392b; }
+.cols { display:block; }
+.metric-list { display:flex; flex-wrap:wrap; gap:2px 28px; margin-bottom:10px; max-height:190px; overflow-y:auto; align-content:flex-start; }
+.metric-list label { display:block; font-size:13px; padding:2px 0; cursor:pointer; white-space:nowrap; }
+.metric-list .group { margin-bottom:8px; }
+.metric-list .group-title { font-size:12px; color:var(--gray); text-transform:uppercase; }
+.charts { width:100%; }
+.chart { margin-bottom:14px; }
+.chart h3 { font-size:12px; margin:0 0 4px; color:var(--ink); }
+.chart svg { width:100%; height:180px; background:#fbfaf8; border:1px solid #eee; border-radius:4px; }
+.legend { font-size:11px; color:var(--gray); }
+.legend span { margin-right:10px; }
+td.logbody { white-space:normal; overflow-wrap:anywhere; }
+a { color: var(--ote-blue); }
+a:hover { color: var(--ink); }
+tr[data-trace] { cursor:pointer; }
+a[data-trace] { cursor:pointer; }
+.inline-trace { background:#fbfaf8; border:1px solid #e8e6e0; border-radius:4px; padding:8px; margin:2px 0 8px; }
+.trace-detail > td { padding:0 8px 8px; }
+.filters { margin-bottom:8px; display:flex; gap:8px; flex-wrap:wrap; }
+.filters input { padding:3px 6px; font-size:12px; border:1px solid #ccc; border-radius:4px; }
+footer { padding:8px 16px; color:var(--gray); font-size:12px; display:flex; justify-content:space-between; }
+</style>
+</head>
+<body>
+<header>
+  <span class="brand"><span class="ote">OTE</span><span class="lite">Lite</span><span class="tld">.io</span></span>
+  <span class="motto">too small, will fail</span>
+  <span class="ranges" id="ranges">
+    <button data-min="5">5m</button>
+    <button data-min="15">15m</button>
+    <button data-min="60" class="active">1h</button>
+    <button data-min="360">6h</button>
+    <button data-min="1440">1d</button>
+    <button data-min="10080">7d</button>
+    <input type="text" id="from-ts" placeholder="YYYY-MM-DD HH:mm" size="16" title="24h, local time">
+    <input type="text" id="to-ts" placeholder="YYYY-MM-DD HH:mm" size="16" title="24h, local time">
+    <button id="apply-custom">apply</button>
+    <button id="copy-range" title="copy this range for another tab">copy</button>
+  </span>
+</header>
+<main>
+  <section>
+    <h2>Traces <span class="path">GET /strace/traces</span></h2>
+    <div id="trace-scatter"></div>
+    <div id="trace-list">loading...</div>
+  </section>
+  <section>
+    <h2>Metrics <span class="path">GET /awk/metrics, /awk/series</span></h2>
+    <div class="cols">
+      <input id="metric-filter" placeholder="filter metrics..." style="margin-bottom:6px">
+      <div class="metric-list" id="metric-list">loading...</div>
+      <div class="charts" id="charts">pick metrics on the left</div>
+    </div>
+  </section>
+  <section>
+    <h2>Logs <span class="path">GET /grep/logs, /grep/logs/series</span></h2>
+    <div id="log-chart"></div>
+    <div id="log-sev" class="legend" style="margin:6px 0"></div>
+    <div class="filters">
+      <input id="log-service" placeholder="service">
+      <input id="log-q" placeholder="grep...">
+      <button id="log-apply">grep</button>
+    </div>
+    <div id="log-lines">loading...</div>
+  </section>
+  <section>
+    <h2>Services <span class="path">GET /perl/stats</span></h2>
+    <div id="stats">loading...</div>
+  </section>
+</main>
+<footer><span>the disposable OTEL backend - <a href="https://github.com/aivarsk/otelite/issues">fan mail</a></span><span class="mono">strace awk grep perl</span></footer>
+<script src="/static/uplot.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { fromMs: Date.now() - 3600e3, toMs: Date.now(), metrics: null, selected: new Set(), metricCharts: [], logChart: null, sevHidden: new Set(), logData: [] };
+// grafana style: the range lives in the URL, so a copied or duplicated tab
+// carries it. load it first if present and sane.
+{
+  const params = new URLSearchParams(location.search);
+  const fromParam = parseInt(params.get("from") || "", 10);
+  const toParam = parseInt(params.get("to") || "", 10);
+  if (isFinite(fromParam) && isFinite(toParam) && fromParam >= 0 && toParam > fromParam) {
+    state.fromMs = fromParam;
+    state.toMs = toParam;
+  }
+}
+const COLORS = ["#2E6BE6", "#F2A33C", "#17242B", "#8A94A0", "#c0392b", "#27ae60"];
+const SEV_ORDER = ["FATAL", "ERROR", "WARN", "INFO", "DEBUG", "TRACE", "UNSPECIFIED"];
+const SEV_COLORS = { FATAL: "#7b241c", ERROR: "#c0392b", WARN: "#b9770e", INFO: "#2E6BE6", DEBUG: "#8A94A0", TRACE: "#27ae60", UNSPECIFIED: "#17242B" };
+function pad2(n) { return String(n).padStart(2, "0"); }
+// one axis language for every chart: more detail as the visible span narrows
+function timeLabel(ms, spanMs) {
+  const d = new Date(ms);
+  const date = d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+  const hms = pad2(d.getHours()) + ":" + pad2(d.getMinutes()) + ":" + pad2(d.getSeconds());
+  if (spanMs > 7 * 86400e3) return date;
+  if (spanMs > 600e3) return hms.slice(0, 5);
+  if (spanMs > 20e3) return hms;
+  return hms + "." + String(d.getMilliseconds()).padStart(3, "0");
+}
+const PLOT_AXES = [
+  { stroke: "#8A94A0", grid: { stroke: "#e8e6e0" }, ticks: { stroke: "#e8e6e0" }, size: 40, space: 100,
+    values: (u, splits) => splits.map((s) => timeLabel(s * 1000, state.toMs - state.fromMs)) },
+  { stroke: "#8A94A0", grid: { stroke: "#e8e6e0" }, ticks: { stroke: "#e8e6e0" }, size: 52 },
+];
+function sevRank(s) { const i = SEV_ORDER.indexOf(s); return i === -1 ? 50 : i; }
+
+function fmtDay(ms) { const d = new Date(ms); return d.toLocaleDateString("sv") + " " + d.toLocaleTimeString("en-GB", { hour12: false }) + "." + String(d.getMilliseconds()).padStart(3, "0"); }
+function parseDate(s) {
+  const m = String(s).trim().match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (!m) return NaN;
+  return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)).getTime();
+}
+
+async function getJson(path, params) {
+  const qs = new URLSearchParams(params).toString();
+  const res = await fetch(path + (qs ? "?" + qs : ""));
+  if (!res.ok) throw new Error(path + " -> " + res.status);
+  return res.json();
+}
+
+async function refreshAll() {
+  syncRangeInputs();
+  syncUrl();
+  loadTraces(); loadLogs(); loadLogsChart(); loadStats(); loadMetricList();
+}
+
+function rangeInputValue(ms) {
+  const d = new Date(ms);
+  return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()) +
+    " " + pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+}
+function syncRangeInputs() {
+  $("from-ts").value = rangeInputValue(state.fromMs);
+  $("to-ts").value = rangeInputValue(state.toMs);
+}
+function syncUrl() {
+  const params = new URLSearchParams();
+  params.set("from", String(Math.round(state.fromMs)));
+  params.set("to", String(Math.round(state.toMs)));
+  history.replaceState(null, "", "?" + params.toString());
+}
+
+$("ranges").addEventListener("click", (e) => {
+  if (e.target.tagName !== "BUTTON" || !e.target.dataset.min) return;
+  document.querySelectorAll("#ranges button[data-min]").forEach(b => b.classList.remove("active"));
+  e.target.classList.add("active");
+  const min = parseInt(e.target.dataset.min, 10);
+  state.toMs = Date.now(); state.fromMs = state.toMs - min * 60e3;
+  refreshAll();
+});
+$("apply-custom").onclick = () => {
+  const f = parseDate($("from-ts").value), t = parseDate($("to-ts").value);
+  if (isNaN(f) || isNaN(t)) { alert("use YYYY-MM-DD HH:mm (24h)"); return; }
+  state.fromMs = f; state.toMs = t;
+  document.querySelectorAll("#ranges button[data-min]").forEach(b => b.classList.remove("active"));
+  refreshAll();
+};
+$("copy-range").onclick = async () => {
+  try {
+    await navigator.clipboard.writeText(location.href);
+    const button = $("copy-range");
+    button.textContent = "copied";
+    setTimeout(() => { button.textContent = "copy"; }, 1200);
+  } catch (e) {
+    alert("clipboard blocked; copy the URL manually, it carries from and to");
+  }
+};
+
+async function loadTraces() {
+  try {
+    const data = await getJson("/strace/traces", { from: state.fromMs, to: state.toMs });
+    const rows = data.traces.map(t =>
+      `<tr class="clickable" data-id="${t.trace_id}">
+        <td>${fmtDay(t.start_ms)}</td><td>${esc(t.root)}</td><td>${esc(t.service)}</td>
+        <td>${t.spans}</td><td class="${t.errors ? "err" : ""}">${t.errors}</td>
+        <td>${t.duration_ms} ms</td>
+        <td><div class="bar-row"><div class="bar ${t.errors ? "error" : ""}" style="left:0;width:100%"></div></div></td>
+      </tr>`).join("");
+    $("trace-list").innerHTML = data.traces.length
+      ? `<table><thead><tr><th>start</th><th>root</th><th>service</th><th>spans</th><th>errors</th><th>duration</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+      : "no traces in range";
+    renderTraceScatter(data.traces);
+    $("trace-list").querySelectorAll("tr[data-id]").forEach(tr =>
+      tr.onclick = () => expandTraceRow(tr));
+  } catch (e) { $("trace-list").textContent = e.message; }
+}
+
+function expandTraceRow(tr) {
+  const next = tr.nextElementSibling;
+  if (next && next.classList.contains("trace-detail")) { next.remove(); return; }
+  document.querySelectorAll("#trace-list .trace-detail").forEach(e => e.remove());
+  const row = document.createElement("tr");
+  row.className = "trace-detail";
+  row.innerHTML = '<td colspan="7"><div class="inline-trace"></div></td>';
+  tr.after(row);
+  showTrace(tr.dataset.id, row.querySelector(".inline-trace"));
+}
+
+// duration vs time, one dot per trace: the companion chart Jaeger and Tempo
+// show above their trace lists. errors red, dot size grows with span count.
+function renderTraceScatter(traces) {
+  const host = $("trace-scatter");
+  host.innerHTML = "";
+  if (!traces.length) return;
+  // fixed pixel size: with only a viewBox the svg scales its fonts like an
+  // image when the container changes; a hidden host keeps the last good width
+  const W = host.clientWidth || state.plotWidth || 800, H = 120, PL = 46, PR = 8, PT = 6, PB = 18;
+  state.plotWidth = W;
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("width", W);
+  svg.setAttribute("height", H);
+  const t0 = state.fromMs, t1 = state.toMs, span = Math.max(t1 - t0, 1);
+  const dmax = Math.max(...traces.map(t => t.duration_ms), 1);
+  const x = (ms) => PL + ((ms - t0) / span) * (W - PL - PR);
+  const y = (d) => PT + (1 - Math.min(d / dmax, 1)) * (H - PT - PB);
+  const el = (tag, attrs) => {
+    const e = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  };
+  for (let i = 0; i <= 2; i++) {
+    const d = (dmax * i) / 2, yy = y(d).toFixed(1);
+    svg.appendChild(el("line", { x1: PL, y1: yy, x2: W - PR, y2: yy, stroke: "#e8e6e0" }));
+    const label = el("text", { x: PL - 4, y: +yy + 3, "text-anchor": "end", "font-size": 10, fill: "#8A94A0" });
+    label.textContent = Math.round(d) + "ms";
+    svg.appendChild(label);
+    const xl = el("text", { x: x(t0 + (span * i) / 2).toFixed(1), y: H - 4, "text-anchor": "middle", "font-size": 10, fill: "#8A94A0" });
+    xl.textContent = timeLabel(t0 + (span * i) / 2, span);
+    svg.appendChild(xl);
+  }
+  let dragStart = null, dragRect = null, dragged = false;
+  const pxOf = (e) => {
+    const rect = svg.getBoundingClientRect();
+    return ((e.clientX - rect.left) / rect.width) * W;
+  };
+  svg.addEventListener("pointerdown", (e) => {
+    dragStart = pxOf(e);
+    dragged = false;
+    dragRect = el("rect", { x: dragStart, y: 0, width: 0, height: H, fill: "rgba(46,107,230,0.15)", stroke: "#2E6BE6" });
+    svg.appendChild(dragRect);
+    svg.setPointerCapture(e.pointerId);
+  });
+  svg.addEventListener("pointermove", (e) => {
+    if (dragStart === null) return;
+    const px = pxOf(e);
+    const x0 = Math.max(Math.min(dragStart, px), PL), x1 = Math.min(Math.max(dragStart, px), W - PR);
+    dragRect.setAttribute("x", x0);
+    dragRect.setAttribute("width", Math.max(x1 - x0, 0));
+    dragged = Math.abs(px - dragStart) > 4;
+  });
+  svg.addEventListener("pointerup", (e) => {
+    if (dragStart === null) return;
+    const px = pxOf(e);
+    const x0 = Math.max(Math.min(dragStart, px), PL), x1 = Math.min(Math.max(dragStart, px), W - PR);
+    dragStart = null;
+    dragRect.remove();
+    dragRect = null;
+    if (x1 - x0 < 4) { dragged = false; return; }
+    const msAt = (px2) => t0 + ((px2 - PL) / (W - PL - PR)) * span;
+    state.fromMs = Math.round(msAt(x0));
+    state.toMs = Math.round(msAt(x1));
+    document.querySelectorAll("#ranges button[data-min]").forEach(b => b.classList.remove("active"));
+    refreshAll();
+  });
+  traces.forEach(t => {
+    const dot = el("circle", {
+      class: "tdot", cx: x(t.start_ms).toFixed(1), cy: y(t.duration_ms).toFixed(1),
+      r: (3 + Math.min(t.spans, 30) / 8).toFixed(1),
+      fill: t.errors ? "#c0392b" : "#2E6BE6", opacity: 0.75, "data-id": t.trace_id,
+    });
+    dot.addEventListener("click", () => {
+      if (dragged) return;
+      const row = document.querySelector(`#trace-list tr[data-id="${t.trace_id}"]`);
+      if (row) { expandTraceRow(row); row.scrollIntoView({ block: "nearest" }); }
+    });
+    svg.appendChild(dot);
+  });
+  host.appendChild(svg);
+}
+
+async function showTrace(id, container) {
+  if (!container) return;
+  container.textContent = "loading...";
+  const data = await getJson("/strace/trace", { id });
+  const spans = data.spans;
+  if (!spans.length) { container.textContent = "trace not found"; return; }
+  const byId = new Map(spans.map(s => [s.span_id, s]));
+  const depth = (s) => { let d = 0, cur = s, guard = 0;
+    while (cur.parent_id && byId.has(cur.parent_id) && guard++ < 64) { cur = byId.get(cur.parent_id); d++; } return d; };
+  const t0 = Math.min(...spans.map(s => s.start_ms));
+  const t1 = Math.max(...spans.map(s => s.start_ms + s.duration_ms));
+  const span = Math.max(t1 - t0, 1);
+  const TICKS = 5;
+  container.innerHTML = `<div class="dim" style="margin-bottom:2px">trace ${id} - ${spans.length} spans</div>` +
+    `<div class="wf-row">
+      <div class="wf-name"></div>
+      <div class="wf-lane wf-tick-lane">` +
+      Array.from({ length: TICKS }, (_, i) =>
+        `<span class="wf-tick" style="left:${(i / TICKS) * 100}%">${timeLabel(t0 + (span * i) / TICKS, span)}</span>`).join("") +
+      `</div><div></div>
+    </div>` +
+    spans.map(s => {
+      const d = depth(s);
+      const left = ((s.start_ms - t0) / span) * 100;
+      const width = Math.max((s.duration_ms / span) * 100, 0.4);
+      return `<div class="wf-row">
+        <div class="wf-name" style="padding-left:${d * 16}px" title="${esc(attrsText(s.attrs))}">${s.status_code === 2 ? '<span class="err">x</span> ' : ""}${esc(s.name)} <span class="dim">${esc(s.service)}</span></div>
+        <div class="wf-lane"><div class="wf-bar ${s.status_code === 2 ? "error" : ""}" style="left:${left}%;width:${width}%"></div></div>
+        <div class="dim">${s.duration_ms} ms</div>
+      </div>`;
+    }).join("");
+}
+function attrsText(a) { return Object.entries(a).map(([k, v]) => k + "=" + JSON.stringify(v)).join("  "); }
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+async function loadMetricList() {
+  if (state.metrics) return renderMetricList();
+  state.metrics = await getJson("/awk/metrics");
+  renderMetricList();
+}
+function renderMetricList() {
+  const needle = ($("metric-filter").value || "").trim().toLowerCase();
+  const groups = state.metrics.groups
+    .map(g => ({ ...g, metrics: g.metrics.filter(m => !needle || m.name.toLowerCase().includes(needle)) }))
+    .filter(g => g.metrics.length);
+  $("metric-list").innerHTML = groups.length ? groups.map(g =>
+    `<div class="group"><div class="group-title">${esc(g.unit)} / ${g.kind}</div>` +
+    g.metrics.map(m =>
+      `<label><input type="checkbox" data-id="${m.id}" ${state.selected.has(m.id) ? "checked" : ""}>
+       ${esc(m.name)} <span class="dim">${m.samples}</span></label>`).join("") + "</div>"
+  ).join("") : "no metrics match";
+  $("metric-list").querySelectorAll("input[type=checkbox]").forEach(cb =>
+    cb.onchange = () => { cb.checked ? state.selected.add(+cb.dataset.id) : state.selected.delete(+cb.dataset.id); renderCharts(); });
+  renderCharts();
+}
+$("metric-filter").addEventListener("input", renderMetricList);
+async function renderCharts() {
+  const ids = [...state.selected];
+  const host = $("charts");
+  state.metricCharts.forEach(c => c.destroy());
+  state.metricCharts = [];
+  host.innerHTML = "";
+  if (!ids.length) { host.textContent = "pick metrics on the left"; return; }
+  host.textContent = "loading...";
+  const data = await getJson("/awk/series", { id: ids.join(","), from: state.fromMs, to: state.toMs });
+  const names = new Map(data.series.map(s => [s.metric_id, s.name]));
+  const byUnit = new Map();
+  for (const g of state.metrics.groups) for (const m of g.metrics)
+    if (state.selected.has(m.id)) byUnit.set(m.id, g.unit);
+  const charts = new Map();
+  for (const s of data.series) {
+    const unit = byUnit.get(s.metric_id) || "unitless";
+    if (!charts.has(unit)) charts.set(unit, []);
+    charts.get(unit).push(s);
+  }
+  host.innerHTML = "";
+  for (const [unit, seriesList] of charts) {
+    const div = document.createElement("div");
+    div.className = "chart";
+    div.innerHTML = `<h3>${esc(unit)}</h3>`;
+    const plot = document.createElement("div");
+    div.appendChild(plot);
+    const xsSet = new Set();
+    for (const s of seriesList) for (const [ts] of s.points) xsSet.add(ts / 1000);
+    const xs = [...xsSet].sort((a, b) => a - b);
+    const columns = [xs];
+    seriesList.forEach((s, i) => {
+      const by = new Map(s.points.map(([ts, v]) => [ts / 1000, v]));
+      columns.push(xs.map(t => by.has(t) ? by.get(t) : null));
+    });
+    const u = new uPlot({
+      width: Math.max(host.clientWidth, 320),
+      height: 180,
+      scales: { x: { time: true } },
+      cursor: { drag: { x: true, y: false } },
+      legend: { live: false },
+      series: [
+        { label: "" },
+        ...seriesList.map((s, i) => ({
+          label: esc(names.get(s.metric_id)) + (s.service_name ? " @ " + esc(s.service_name) : ""),
+          stroke: COLORS[i % COLORS.length],
+          width: 1.5,
+          spanGaps: true,
+        })),
+      ],
+      axes: PLOT_AXES,
+      hooks: { setSelect: [onBrush] },
+    }, columns, plot);
+    state.metricCharts.push(u);
+    host.appendChild(div);
+  }
+}
+
+function onBrush(u) {
+  const sel = u.select;
+  if (!sel || sel.width < 4) return;
+  const x0 = u.posToVal(sel.left, "x"), x1 = u.posToVal(sel.left + sel.width, "x");
+  state.fromMs = Math.round(Math.min(x0, x1) * 1000);
+  state.toMs = Math.round(Math.max(x0, x1) * 1000);
+  document.querySelectorAll("#ranges button[data-min]").forEach(b => b.classList.remove("active"));
+  refreshAll();
+}
+
+function logFilterParams() {
+  const params = { from: state.fromMs, to: state.toMs };
+  const svc = $("log-service").value.trim(); if (svc) params.service = svc;
+  const q = $("log-q").value.trim(); if (q) params.q = q;
+  return params;
+}
+
+async function loadLogsChart() {
+  const host = $("log-chart");
+  try {
+    const data = await getJson("/grep/logs/series", logFilterParams());
+    if (state.logChart) { state.logChart.destroy(); state.logChart = null; }
+    host.innerHTML = "";
+    const names = Object.keys(data.severities).sort((a, b) => sevRank(a) - sevRank(b));
+    if (!names.length) return;
+    const n = data.severities[names[0]].length;
+    const xs = Array.from({ length: n }, (_, i) => (data.from_ms + i * data.bucket_ms) / 1000);
+    const columns = [xs, ...names.map(name => data.severities[name])];
+    const u = new uPlot({
+      width: Math.max(host.clientWidth, 320),
+      height: 140,
+      scales: { x: { time: true } },
+      cursor: { drag: { x: true, y: false } },
+      legend: { show: false },
+      series: [
+        { label: "time" },
+        ...names.map(name => ({ label: name, stroke: SEV_COLORS[name] || "#17242B", width: 1.5 })),
+      ],
+      axes: PLOT_AXES,
+      hooks: { setSelect: [onBrush] },
+    }, columns, host);
+    state.logChart = u;
+    $("log-sev").innerHTML = names.map((name, i) => {
+      const total = data.severities[name].reduce((a, b) => a + b, 0);
+      const hidden = state.sevHidden.has(name);
+      return `<span data-i="${i + 1}" data-name="${esc(name)}" title="toggle ${esc(name)}"` +
+        ` style="cursor:pointer;${hidden ? "opacity:.35;text-decoration:line-through" : ""}">` +
+        `<span style="color:${SEV_COLORS[name] || "#17242B"}">${esc(name)}</span> ${total}</span>`;
+    }).join("");
+    $("log-sev").querySelectorAll("span[data-i]").forEach(chip => chip.onclick = () => {
+      const name = chip.dataset.name;
+      if (state.sevHidden.has(name)) state.sevHidden.delete(name); else state.sevHidden.add(name);
+      u.setSeries(+chip.dataset.i, { show: !state.sevHidden.has(name) });
+      chip.style.opacity = state.sevHidden.has(name) ? ".35" : "1";
+      chip.style.textDecoration = state.sevHidden.has(name) ? "line-through" : "none";
+      renderLogLines();
+    });
+  } catch (e) { host.textContent = e.message; }
+}
+
+function reloadLogs() { loadLogs(); loadLogsChart(); }
+$("log-apply").onclick = reloadLogs;
+$("log-q").addEventListener("keydown", e => { if (e.key === "Enter") reloadLogs(); });
+async function loadLogs() {
+  try {
+    const data = await getJson("/grep/logs", logFilterParams());
+    state.logData = data.logs;
+    renderLogLines();
+  } catch (e) { $("log-lines").textContent = e.message; }
+}
+
+function toggleTraceRow(row, traceId) {
+  const next = row.nextElementSibling;
+  if (next && next.classList.contains("trace-detail")) { next.remove(); return; }
+  document.querySelectorAll("#log-lines .trace-detail").forEach(e => e.remove());
+  const detail = document.createElement("tr");
+  detail.className = "trace-detail";
+  detail.innerHTML = '<td colspan="4"><div class="inline-trace"></div></td>';
+  row.after(detail);
+  showTrace(traceId, detail.querySelector(".inline-trace"));
+}
+
+function renderLogLines() {
+  const visible = state.logData.filter(l => !state.sevHidden.has(l.severity || "UNSPECIFIED"));
+  const note = visible.length !== state.logData.length
+    ? ` <span class="dim">(${visible.length} of ${state.logData.length}, severity filter)</span>` : "";
+  $("log-lines").innerHTML = visible.length
+    ? `<table><thead><tr><th>time</th><th>severity</th><th>service</th><th>message</th></tr></thead><tbody>` +
+      visible.map(l =>
+        `<tr${l.trace_id ? ` data-trace="${l.trace_id}"` : ""}><td>${fmtDay(l.time_ms)}</td>` +
+        `<td class="${sevClass(l.severity)}">${esc(l.severity)}</td>` +
+        `<td class="dim">${esc(l.service)}</td>` +
+        `<td class="logbody">${esc(l.body)}` +
+        (l.trace_id ? ` <a data-trace="${l.trace_id}">${l.trace_id.slice(0, 8)}</a>` : "") + `</td></tr>`
+      ).join("") + `</tbody></table>` + note
+    : (state.logData.length ? "every line is hidden by the severity filter" : "no logs in range");
+  $("log-lines").querySelectorAll("tr[data-trace]").forEach(row =>
+    row.onclick = () => toggleTraceRow(row, row.dataset.trace));
+}
+function sevClass(sev) {
+  if (/error|fatal/i.test(sev)) return "err";
+  if (/warn/i.test(sev)) return "warn";
+  return "dim";
+}
+
+async function loadStats() {
+  try {
+    const data = await getJson("/perl/stats", { from: state.fromMs, to: state.toMs });
+    $("stats").innerHTML = data.services.length
+      ? `<table><thead><tr><th>service</th><th>spans</th><th>errors</th><th>metric samples</th><th>logs</th></tr></thead><tbody>` +
+        data.services.map(s => `<tr><td>${esc(s.service)}</td><td>${s.spans}</td><td class="${s.errors ? "err" : ""}">${s.errors}</td><td>${s.samples}</td><td>${s.logs}</td></tr>`).join("") + "</tbody></table>"
+      : "nothing in range";
+  } catch (e) { $("stats").textContent = e.message; }
+}
+
+// panels collapse from their headers when the page needs to be shorter;
+// uncollapsing and window resizes re-render so charts measure a visible host
+document.querySelectorAll("main section > h2").forEach(h =>
+  h.onclick = () => {
+    h.parentElement.classList.toggle("collapsed");
+    if (!h.parentElement.classList.contains("collapsed")) refreshAll();
+  });
+let resizeTimer;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(refreshAll, 150);
+});
+
+refreshAll();
+</script>
+</body>
+</html>

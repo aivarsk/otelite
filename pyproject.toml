@@ -1,0 +1,22 @@
+[project]
+name = "otelite"
+version = "2026.10.21"
+description = "Small OTEL backend for test and dev - one process, one SQLite file, one page."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Aivars Kalvans", email = "aivars.kalvans@gmail.com" }]
+
+[project.scripts]
+otelite = "otelite.cli:main"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+warn_unused_ignores = true
+show_error_codes = true
+check_untyped_defs = true
+
+[tool.ruff]
+line-length = 120
