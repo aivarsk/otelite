@@ -1,6 +1,6 @@
 # otelite
 
-*The garage edition of OpenTelemetry.*
+*The garage edition of OTEL. A small, disposable OTEL backend for test and dev.*
 
 A small OpenTelemetry backend for test and dev. Speaks OTLP/HTTP, stores
 traces and metrics in one SQLite file, logs as JSONL on disk, and shows
@@ -43,6 +43,24 @@ No alerts, no dashboards-as-product, no retention machinery, no high
 availability. Eventual consistency, garage grade. No fsync: if it dies, it
 dies, and you start a new instance in seconds. When an instance grows too
 big, seal it, keep it as history, spawn a fresh one.
+
+## File formats (the API)
+
+Traces and metrics live in `otelite.sqlite`, logs in `logs/<day>/<service>.jsonl`.
+The full DDL and the design notes are in `docs/design/schema.md`; the shape
+in one breath:
+
+- `spans`: hot columns (trace/span/parent ids as blobs, service, times,
+  status) plus attrs, events, and links as JSON text. Indexed by trace id,
+  service plus time, and time.
+- `metrics`: dictionary tables for names and attribute sets, a raw
+  `samples` table keyed by (ms timestamp, metric, attributes, service).
+  No rollups, charts read raw rows.
+- log lines: one flattened JSON record per line, nanosecond timestamps,
+  ids kept as hex strings so `grep <trace-id>` is the trace join.
+
+Formats are stable for a given `user_version`; bumps recreate empty, this
+is a dev tool.
 
 ## Development
 

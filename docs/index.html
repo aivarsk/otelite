@@ -52,10 +52,11 @@
     <div class="install p-3 mt-3 d-inline-block">
       <pre class="mono">curl -fsSL https://otelite.io/install.sh | bash</pre>
     </div>
-    <p class="text-secondary small mt-2">prefer to read what you run? download the latest <span class="mono">otelite-*.pyz</span> from the <a href="https://github.com/aivarsk/otelite/releases">releases page</a> and start it with <span class="mono">python3 otelite-*.pyz</span>. First run, empty page? <span class="mono">otelite --demo</span> fills it with sample telemetry.</p>
+    <p class="text-secondary small mt-2">from the repo instead: <a href="https://github.com/aivarsk/otelite" class="mono">github.com/aivarsk/otelite</a>, releases page has the <span class="mono">otelite-*.pyz</span>. Prefer to read what you run? <span class="mono">python3 otelite-*.pyz</span> is the whole install. First run, empty page? <span class="mono">otelite --demo</span> fills it with sample telemetry.</p>
     <p class="mt-3">Then open <a href="http://localhost:4318/" class="ote mono text-decoration-none">http://localhost:4318/</a> in your browser and enjoy your OTEL.</p>
     <p class="mono motto mb-1">The Fast and the Disposable.</p>
     <p class="mono">3,500+ requests per second. 20,000+ records. No fsync. Nobody cares in the garage. <span class="text-secondary small">(laptop, one process, stdlib only)</span></p>
+    <p class="text-secondary small mt-2">Built as a single-file Python zipapp, standard library only, zero runtime dependencies.</p>
   </div>
 </header>
 
@@ -79,6 +80,20 @@
       <li>Open the single page at <a href="http://localhost:4318/" class="ote mono text-decoration-none">http://localhost:4318/</a>, pick a time range, and see traces, metrics, and logs together.</li>
     </ol>
     <p>The files are the API. Your data stays in a directory you own.</p>
+  </section>
+
+  <section class="mb-5">
+    <h2>Your first span is one curl</h2>
+    <p>No SDK, no collector, no setup. Start otelite, paste this, and the span is on the page:</p>
+    <div class="install p-3 mt-2">
+      <pre class="mono">curl -s -X POST localhost:4318/v1/traces \
+  -H 'Content-Type: application/json' -d @- &lt;&lt;EOF
+{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"curl"}}]},
+ "scopeSpans":[{"spans":[{"traceId":"5b8efff798038103d269b633813fc60c","spanId":"eee19b7ec3c1b174",
+ "name":"hello from curl","startTimeUnixNano":"$(date +%s%N)","endTimeUnixNano":"$(date +%s%N)"}]}]}]}
+EOF</pre>
+    </div>
+    <p class="text-secondary small mt-2">Timestamps are nanoseconds since epoch, <span class="mono">$(date +%s%N)</span> fills in now. Open the page, it is already there.</p>
   </section>
 
   <section class="mb-5">

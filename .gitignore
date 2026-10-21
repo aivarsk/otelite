@@ -32,3 +32,4 @@ AGENTS.md
 CLAUDE.md
 CONTEXT.md
 *PROFIT*
+tests/test_page.py
