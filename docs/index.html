@@ -16,8 +16,9 @@
     .tld { color: var(--gray); }
     .motto { font-style: italic; }
     .hero { background: #fff; border-bottom: 1px solid #e8e6e0; }
-    .install { background: var(--ink); color: #e8edee; border-radius: .5rem; }
-    .install pre { color: #e8edee; margin: 0; }
+    .install { background: var(--ink); color: #e8edee; border-radius: .5rem; position: relative; }
+    .install pre { color: #e8edee; margin: 0; padding-right: 64px; }
+    .copy-btn { position: absolute; top: 8px; right: 8px; font-size: 11px; padding: 2px 10px; border: 1px solid #3a4a56; background: #17242B; color: #e8edee; border-radius: 4px; cursor: pointer; }
     .footer { color: var(--gray); }
     a.navbar-brand { text-decoration: none; }
     a { color: var(--ote-blue); }
@@ -135,5 +136,24 @@ EOF</pre>
   </div>
 </footer>
 
+<script>
+// copy buttons on the command blocks; text is captured before the button exists
+document.querySelectorAll("pre").forEach((pre) => {
+  const text = pre.textContent;
+  const button = document.createElement("button");
+  button.className = "copy-btn";
+  button.textContent = "copy";
+  button.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      button.textContent = "copied";
+      setTimeout(() => { button.textContent = "copy"; }, 1200);
+    } catch (e) {
+      button.textContent = "select manually";
+    }
+  };
+  pre.appendChild(button);
+});
+</script>
 </body>
 </html>
