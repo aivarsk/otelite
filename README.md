@@ -47,8 +47,8 @@ big, seal it, keep it as history, spawn a fresh one.
 ## File formats (the API)
 
 Traces and metrics live in `otelite.sqlite`, logs in `logs/<day>/<service>.jsonl`.
-The full DDL and the design notes are in `docs/design/schema.md`; the shape
-in one breath:
+The DDL in `src/otelite/db.py` is the spec, with the format notes as
+comments on it; the shape in one breath:
 
 - `spans`: hot columns (trace/span/parent ids as blobs, service, times,
   status) plus attrs, events, and links as JSON text. Indexed by trace id,

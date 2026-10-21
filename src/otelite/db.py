@@ -1,3 +1,28 @@
+"""SQLite storage for traces and metrics. The DDL below is the file format
+spec; the notes that would live in a design doc live here as comments.
+
+Shapes, in one breath:
+
+- spans: hot fields are real columns (ids as blobs, service, times,
+  status), attrs/events/links/resource ride as JSON text. Indexed by
+  trace_id, service+time, time. Ingest caps (256 attrs, 128 events,
+  128 links) are enforced in normalize.py, not here.
+- metrics: dictionary tables for names and content-hashed attribute sets
+  keep the tall samples table narrow. Raw rows only, no rollups; charts
+  read raw samples over the selected range. The primary key includes
+  service_name on purpose: same metric from two services in one
+  millisecond must not collide.
+- pragmas: WAL for reader/writer concurrency, synchronous OFF because
+  this is a disposable dev/test tool (if it dies, it dies), and
+  wal_autocheckpoint 0 so checkpointing never stalls a commit; a
+  background thread checkpoints PASSIVE on a timer instead.
+- versioning: user_version is the migration index. MIGRATIONS is a
+  snapshot install, not an upgrade path; a file whose version does not
+  match is dropped and recreated empty. Dev data is disposable.
+
+Log files have their own format, documented on LogSink in logsio.py.
+"""
+
 import hashlib
 import json
 import logging

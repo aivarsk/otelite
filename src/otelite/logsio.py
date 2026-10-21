@@ -4,7 +4,13 @@ from pathlib import Path
 
 
 class LogSink:
-    """Append-only JSONL handles keyed by (day, service)."""
+    """Append-only JSONL handles keyed by (day, service).
+
+    One flattened JSON record per line, nanosecond timestamps, trace and
+    span ids kept as hex strings so `grep <trace-id> logs/` is the trace
+    join. No compression, ever: bare grep is the whole toolchain. A crash
+    may leave a partial last line; readers skip unparseable tails.
+    """
 
     def __init__(self, root):
         self.root = Path(root)
