@@ -78,23 +78,34 @@
     <ol>
       <li>Point your OTEL SDK or collector at OTELite, OTLP/HTTP on port 4318.</li>
       <li>Traces and metrics land in one SQLite file you SELECT from. Logs land as JSONL files you grep. No new query languages: SQL and grep are the query languages.</li>
-      <li>Open the single page at <a href="http://localhost:4318/" class="ote mono text-decoration-none">http://localhost:4318/</a>, pick a time range, and see traces, metrics, and logs together.</li>
+      <li>Open the single page at <a href="http://localhost:4318/" class="ote mono text-decoration-none">http://localhost:4318/</a>, pick a time range, and see traces, metrics, and logs together. Filter logs by service, severity, or a grep string; click any line to jump to its trace; pick metrics and they chart on a shared range.</li>
     </ol>
     <p>The files are the API. Your data stays in a directory you own.</p>
   </section>
 
   <section class="mb-5">
     <h2>Your first span is one curl</h2>
-    <p>No SDK, no collector, no setup. Start otelite, paste this, and the span is on the page:</p>
+    <p>Start otelite (<span class="mono">curl -fsSL https://otelite.io/install.sh | bash</span>, or <span class="mono">python3 otelite-*.pyz</span> from the releases page), paste this, and the span is on the page:</p>
     <div class="install p-3 mt-2">
       <pre class="mono">curl -s -X POST localhost:4318/v1/traces \
   -H 'Content-Type: application/json' -d @- &lt;&lt;EOF
 {"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"curl"}}]},
  "scopeSpans":[{"spans":[{"traceId":"5b8efff798038103d269b633813fc60c","spanId":"eee19b7ec3c1b174",
- "name":"hello from curl","startTimeUnixNano":"$(date +%s%N)","endTimeUnixNano":"$(date +%s%N)"}]}]}]}
+ "name":"hello from curl","startTimeUnixNano":"$(( $(date +%s%N) - 150000000 ))","endTimeUnixNano":"$(date +%s%N)"}]}]}]}
 EOF</pre>
     </div>
-    <p class="text-secondary small mt-2">Timestamps are nanoseconds since epoch, <span class="mono">$(date +%s%N)</span> fills in now. Open the page, it is already there.</p>
+    <p class="mt-2">Open <a href="http://localhost:4318/" class="ote mono text-decoration-none">http://localhost:4318/</a>: a 150 ms bar with your name on it, already there.</p>
+  </section>
+
+  <section class="mb-5">
+    <h2>The files are the API</h2>
+    <p><span class="mono">otelite.sqlite</span> holds traces and metrics: a <span class="mono">spans</span> table (ids, service, times, and status as columns; attributes, events, and links as JSON), and a <span class="mono">samples</span> table (ms timestamp, metric, label set, service, value) with small dictionary tables for metric names and label sets. <span class="mono">logs/&lt;day&gt;/&lt;service&gt;.jsonl</span> holds one flattened record per line:</p>
+    <div class="install p-3 mt-2">
+      <pre class="mono">{"time_unix_nano":1729328732051000000,"severity_text":"ERROR",
+ "body":"POST /pay -&gt; 500 in 21ms","service_name":"checkout",
+ "trace_id":"5b8efff798038103d269b633813fc60c","span_id":"eee19b7ec3c1b174"}</pre>
+    </div>
+    <p class="mt-2">Sealing is a rename: stop the process, keep the directory as <span class="mono">otelite-2026-10-21/</span>, start a fresh one. A CI run can upload just that directory as its artifact. The DDL, notes included, is <span class="mono">src/otelite/db.py</span>.</p>
   </section>
 
   <section class="mb-5">
