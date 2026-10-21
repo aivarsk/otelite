@@ -1,0 +1,7 @@
+.git
+private
+generator/.venv
+**/__pycache__
+dist
+build_zipapp
+*.pyc

@@ -16,6 +16,17 @@ curl -fsSL https://otelite.io/install.sh | bash
 Point your OTEL SDK at `http://localhost:4318` and open the same address
 in a browser. That is the whole setup.
 
+Rather not pipe install.sh? Download the latest `otelite-*.pyz` from the
+releases page and run `python3 otelite-*.pyz`. Empty page on first run?
+`otelite --demo` fills it with sample telemetry.
+
+```bash
+docker run --rm -p 4318:4318 ghcr.io/aivarsk/otelite:latest
+# first run, empty page? add --demo
+docker build -t otelite . && docker run -p 4318:4318 otelite
+# or: docker compose up
+```
+
 ## What you get
 
 - `POST /v1/traces`, `/v1/metrics`, `/v1/logs` (OTLP/HTTP JSON, gzip accepted, 200 `{}` on acceptance)
@@ -24,6 +35,7 @@ in a browser. That is the whole setup.
 - read APIs named for the garage: `/strace` for traces, `/awk` for metrics, `/grep` for logs, `/perl` for the per-service report
 - zero runtime dependencies, standard library only, ships as a single zipapp
 - measured on a laptop: 3,500+ requests per second, 20,000+ records, one process
+- `otelite --demo` fills a fresh instance with sample telemetry so the page is never empty on first run
 
 ## Small on purpose
 

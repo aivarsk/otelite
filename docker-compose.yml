@@ -1,0 +1,22 @@
+services:
+  otelite:
+    image: ghcr.io/aivarsk/otelite:latest
+    build: .
+    ports:
+      - "4318:4318"
+    volumes:
+      - otelite-data:/data
+
+  # a demo workload that fills the otelite service over the compose network
+  app:
+    build: .
+    profiles: ["demo"]
+    command: ["python3", "/opt/otelite.pyz", "--demo"]
+    environment:
+      OTELITE_DATA_DIR: /tmp/otelite-app
+      OTELITE_DEMO_HOST: otelite
+    depends_on:
+      - otelite
+
+volumes:
+  otelite-data:

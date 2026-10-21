@@ -159,6 +159,31 @@ class TestLandingPage(unittest.TestCase):
     def test_shows_the_viewer_screenshot(self):
         self.assertIn('src="screenshot.jpg"', self.html)
 
+    def test_get_it_without_install_sh(self):
+        # download the pyz straight from releases and run it, no installer
+        self.assertIn("releases page", self.html)
+        self.assertIn("python3 otelite-*.pyz", self.html)
+        self.assertIn("otelite --demo", self.html)
+
+    def test_protocol_support_stated(self):
+        # the OTLP matrix is on the page so the first comment is answered
+        self.assertIn("gRPC on 4317 is not supported", self.html)
+        self.assertIn("Binary protobuf is later", self.html)
+
+    def test_no_competitors_on_the_page(self):
+        # comparisons live in private/hn-prepared-answers.md, not on the site
+        self.assertNotIn("Jaeger", self.html)
+
+    def test_metrics_stance_is_on_the_page(self):
+        # metrics get the same old-sysadmin framing as logs: raw rows, SQL
+        self.assertIn("SQL and grep are the query languages", self.html)
+
+    def test_on_a_server_in_ci(self):
+        # the copy covers running it remotely: env var, compose hostname, artifacts
+        self.assertIn("On a server, in CI", self.html)
+        self.assertIn("OTEL_EXPORTER_OTLP_ENDPOINT", self.html)
+        self.assertIn("http://otelite:4318", self.html)
+
     def test_garage_icon_next_to_github(self):
         self.assertIn('title="no octocats in the garage"', self.html)
 
@@ -170,6 +195,23 @@ class TestLandingPage(unittest.TestCase):
 
     def test_brand_capitalization(self):
         self.assertNotIn("OpenTelemetry", self.html)
+
+
+class TestRepoShape(unittest.TestCase):
+    def test_container_files_ship(self):
+        root = Path(__file__).resolve().parent.parent
+        self.assertTrue((root / "Dockerfile").exists())
+        self.assertTrue((root / "docker-compose.yml").exists())
+        self.assertIn("private", (root / ".dockerignore").read_text())
+
+    def test_compose_uses_the_published_image(self):
+        # the sample runs the registry image, building only as a fallback
+        compose = (Path(__file__).resolve().parent.parent / "docker-compose.yml").read_text()
+        self.assertIn("image: ghcr.io/aivarsk/otelite:latest", compose)
+
+    def test_readme_has_the_pull_line(self):
+        readme = (Path(__file__).resolve().parent.parent / "README.md").read_text()
+        self.assertIn("docker run --rm -p 4318:4318 ghcr.io/aivarsk/otelite:latest", readme)
 
 
 if __name__ == "__main__":

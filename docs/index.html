@@ -52,6 +52,7 @@
     <div class="install p-3 mt-3 d-inline-block">
       <pre class="mono">curl -fsSL https://otelite.io/install.sh | bash</pre>
     </div>
+    <p class="text-secondary small mt-2">prefer to read what you run? download the latest <span class="mono">otelite-*.pyz</span> from the <a href="https://github.com/aivarsk/otelite/releases">releases page</a> and start it with <span class="mono">python3 otelite-*.pyz</span>. First run, empty page? <span class="mono">otelite --demo</span> fills it with sample telemetry.</p>
     <p class="mt-3">Then open <a href="http://localhost:4318/" class="ote mono text-decoration-none">http://localhost:4318/</a> in your browser and enjoy your OTEL.</p>
     <p class="mono motto mb-1">The Fast and the Disposable.</p>
     <p class="mono">3,500+ requests per second. 20,000+ records. No fsync. Nobody cares in the garage. <span class="text-secondary small">(laptop, one process, stdlib only)</span></p>
@@ -74,10 +75,19 @@
     <h2>How it works</h2>
     <ol>
       <li>Point your OTEL SDK or collector at OTELite, OTLP/HTTP on port 4318.</li>
-      <li>Traces and metrics land in one SQLite file. Logs land as JSONL files you grep.</li>
+      <li>Traces and metrics land in one SQLite file you SELECT from. Logs land as JSONL files you grep. No new query languages: SQL and grep are the query languages.</li>
       <li>Open the single page at <a href="http://localhost:4318/" class="ote mono text-decoration-none">http://localhost:4318/</a>, pick a time range, and see traces, metrics, and logs together.</li>
     </ol>
     <p>The files are the API. Your data stays in a directory you own.</p>
+  </section>
+
+  <section class="mb-5">
+    <h2>Protocol notes</h2>
+    <ul>
+      <li>OTLP/HTTP with JSON bodies on port 4318. gzip accepted. 200 {} means accepted; a full queue answers 429 with Retry-After and the SDK retries.</li>
+      <li>gRPC on 4317 is not supported. Point SDKs and the collector at <span class="mono">http://localhost:4318</span>.</li>
+      <li>Binary protobuf is later. JSON is the protocol here.</li>
+    </ul>
   </section>
 
   <section class="mb-5">
@@ -86,6 +96,7 @@
     <ul>
       <li>No alerts, no dashboards-as-product, no retention machinery, no high availability.</li>
       <li>Eventual consistency, garage grade: the 200 arrives before the write, and the page catches up in milliseconds.</li>
+      <li>Ingest spike: over capacity you get 429 with Retry-After, SDKs retry, nothing is silently dropped.</li>
       <li>No fsync. If it dies, it dies, and you start a new instance in seconds.</li>
       <li>When an instance grows too big: seal it, keep it as history, spawn a fresh one.</li>
     </ul>
@@ -94,6 +105,11 @@
   <section class="mb-5">
     <h2>Where it fits</h2>
     <p>One OTELite per namespace, per environment, per CI run. Filtering is done by pointing the right exporters at it, not by building query languages. Spin one up for the tests, delete the machines, keep the data directory for inspection.</p>
+  </section>
+
+  <section class="mb-5">
+    <h2>On a server, in CI</h2>
+    <p>The binary does not care where it runs. Start the same zipapp on a test box or as a CI service, set <span class="mono">OTEL_EXPORTER_OTLP_ENDPOINT</span> to its address (in a compose network that is <span class="mono">http://otelite:4318</span>), and keep the data directory as the artifact you inspect after the run. A Dockerfile and a docker-compose sample ship in the repo, plain HTTP on a dev network, an SSH tunnel does for the page.</p>
   </section>
 </main>
 

@@ -43,6 +43,7 @@ Version: {version}
     (dist_info_dir / "METADATA").write_text(metadata)
 
     # 5. Build the zipapp
+    Path("dist").mkdir(exist_ok=True)
     output = f"dist/{name}-{version}.pyz"
     zipapp.create_archive(
         build_dir,

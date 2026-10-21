@@ -1,9 +1,11 @@
 import argparse
 import asyncio
 import logging
+import os
 import threading
 from pathlib import Path
 
+from . import demo
 from .config import APP_VERSION, Config
 from .server import serve
 from .writer import Writer
@@ -19,6 +21,7 @@ def main(argv=None):
     parser.add_argument("--daemon", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--verbose", action="store_true", help="debug logging")
     parser.add_argument("--version", action="store_true", help="show version and data locations")
+    parser.add_argument("--demo", action="store_true", help="generate demo telemetry into this instance")
     args = parser.parse_args(argv)
 
     if args.version:
@@ -38,6 +41,9 @@ def main(argv=None):
 
     writer = Writer(cfg)
     writer.start()
+    if args.demo:
+        demo_host = os.environ.get("OTELITE_DEMO_HOST", "127.0.0.1")
+        threading.Thread(target=demo.serve, args=(cfg.port, demo_host), daemon=True).start()
     try:
         asyncio.run(serve(cfg, writer))
     except KeyboardInterrupt:
