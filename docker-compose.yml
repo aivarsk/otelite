@@ -11,7 +11,7 @@ services:
   app:
     build: .
     profiles: ["demo"]
-    command: ["python3", "/opt/otelite.pyz", "--demo"]
+    command: ["--demo"]
     environment:
       OTELITE_DATA_DIR: /tmp/otelite-app
       OTELITE_DEMO_HOST: otelite

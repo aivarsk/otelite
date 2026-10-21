@@ -203,6 +203,10 @@ class TestRepoShape(unittest.TestCase):
         self.assertTrue((root / "Dockerfile").exists())
         self.assertTrue((root / "docker-compose.yml").exists())
         self.assertIn("private", (root / ".dockerignore").read_text())
+        # ENTRYPOINT (not CMD) so `docker run image --demo` appends the flag
+        dockerfile = (root / "Dockerfile").read_text()
+        self.assertIn('ENTRYPOINT ["python3", "/opt/otelite.pyz"]', dockerfile)
+        self.assertNotIn("CMD ", dockerfile)
 
     def test_compose_uses_the_published_image(self):
         # the sample runs the registry image, building only as a fallback

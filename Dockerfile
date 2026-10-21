@@ -12,4 +12,4 @@ COPY --from=build /src/dist/otelite-*.pyz /opt/otelite.pyz
 ENV OTELITE_DATA_DIR=/data
 VOLUME /data
 EXPOSE 4318
-CMD ["python3", "/opt/otelite.pyz"]
+ENTRYPOINT ["python3", "/opt/otelite.pyz"]
