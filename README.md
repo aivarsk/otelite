@@ -2,10 +2,11 @@
 
 *The garage edition of OTEL. A small, disposable OTEL backend for test and dev.*
 
-A small OpenTelemetry backend for test and dev. Speaks OTLP/HTTP, stores
-traces and metrics in one SQLite file, logs as JSONL on disk, and shows
-them together on one small page. Python. No cluster, no vendor, no card on
-file.
+A small OpenTelemetry backend for test and dev. Speaks OTLP/HTTP and
+Sentry's error protocol on the same port, stores traces and metrics in
+one SQLite file, logs and Sentry errors as JSONL on disk, and shows
+them together on one small page. Python. No cluster, no vendor, no card
+on file.
 
 ## Quickstart
 
@@ -30,12 +31,49 @@ docker build -t otelite . && docker run -p 4318:4318 otelite
 ## What you get
 
 - `POST /v1/traces`, `/v1/metrics`, `/v1/logs` (OTLP/HTTP JSON, gzip accepted, 200 `{}` on acceptance)
-- traces and metrics in one SQLite file, logs as JSONL files you grep; the files are the API
-- one page for everything: trace list with waterfall, metric picker with charts, raw logs, one shared time range you can brush on any chart
-- read APIs named for the garage: `/strace` for traces, `/awk` for metrics, `/grep` for logs, `/perl` for the per-service report
+- Sentry error events on the same port: `POST /api/<project>/store/` or `/api/<project>/envelope/`, any project id, any or no key, nothing verified; errors land as JSONL grouped by exception
+- traces and metrics in one SQLite file, logs and Sentry errors as JSONL files you grep; the files are the API
+- one page for everything: trace list with waterfall, metric picker with charts, raw logs, Sentry error groups with the trace join, one shared time range you can brush on any chart
+- read APIs named for the garage: `/strace` for traces, `/awk` for metrics, `/grep` for logs and errors, `/perl` for the per-service report
 - zero runtime dependencies, standard library only, ships as a single zipapp
 - measured on a laptop: 3,500+ requests per second, 20,000+ records, one process
 - `otelite --demo` fills a fresh instance with sample telemetry so the page is never empty on first run
+
+## Sentry errors
+
+Any Sentry SDK sends to otelite once the DSN points at it. In
+`http://mykey@localhost:4318/42` the `mykey` part is the public key and `42`
+is the project id; both are labels, they end up in the file name
+(`errors/<day>/42-mykey.jsonl`), nothing is verified:
+
+```bash
+export SENTRY_DSN=http://mykey@localhost:4318/42
+```
+
+```python
+import sentry_sdk
+
+sentry_sdk.init(dsn="http://mykey@localhost:4318/42", traces_sample_rate=1.0)
+```
+
+Two parameters matter for the page:
+
+- `traces_sample_rate` (Python) / `tracesSampleRate` (JavaScript): error
+  events only carry a trace id when tracing is on, and the trace id is
+  what joins an error to its waterfall on the page.
+- `instrumenter="otel"` (sentry-python): run Sentry on top of your OTEL
+  tracer provider and point the OTLP exporter at otelite as well. Error
+  events then share trace ids with the OTLP traces, and clicking an error
+  opens the exact trace it came from.
+
+Scope is error events only: transactions, replays, release health, source
+maps, alerts, and the issue workflow stay with Sentry. Test and CI produce
+errors; otelite keeps those, grouped by exception kind, in the run's own
+data directory, next to the traces and logs from the same run.
+
+Browser SDKs: responses carry no CORS headers yet, so a browser SDK needs
+same-origin serving or a local proxy. Server-side SDKs (Python, Node, Go,
+Rust) just work.
 
 ## Small on purpose
 
@@ -46,7 +84,8 @@ big, seal it, keep it as history, spawn a fresh one.
 
 ## File formats (the API)
 
-Traces and metrics live in `otelite.sqlite`, logs in `logs/<day>/<service>.jsonl`.
+Traces and metrics live in `otelite.sqlite`, logs in `logs/<day>/<service>.jsonl`,
+Sentry errors in `errors/<day>/<project>-<key>.jsonl`.
 The DDL in `src/otelite/db.py` is the spec, with the format notes as
 comments on it; the shape in one breath:
 
@@ -58,6 +97,9 @@ comments on it; the shape in one breath:
   No rollups, charts read raw rows.
 - log lines: one flattened JSON record per line, nanosecond timestamps,
   ids kept as hex strings so `grep <trace-id>` is the trace join.
+- error lines: the whole Sentry event JSON under `event` plus flattened
+  `kind` (exception type), `message`, `release`, and `group` (client
+  fingerprint or type+stacktrace hash, 16 hex chars). Same grep join.
 
 Formats are stable for a given `user_version`; bumps recreate empty, this
 is a dev tool.
@@ -66,7 +108,7 @@ is a dev tool.
 
 ```bash
 make build    # dist/otelite-<version>.pyz
-make test     # 45 tests
+make test     # 79 tests
 make lint     # ruff + mypy
 ./generator/run.sh            # demo data via the real OTEL SDK
 python3 generator/stress.py --signal traces --seconds 20

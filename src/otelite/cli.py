@@ -27,8 +27,9 @@ def main(argv=None):
     if args.version:
         cfg = Config.from_env()
         print("otelite", APP_VERSION)
-        print("  database: ", cfg.db_path)
-        print("  log files:", cfg.logs_dir)
+        print("  database:  ", cfg.db_path)
+        print("  log files: ", cfg.logs_dir)
+        print("  error files:", cfg.errors_dir)
         return 0
 
     logging.basicConfig(
@@ -38,6 +39,7 @@ def main(argv=None):
     cfg = Config.from_env(port=args.port, data_dir=args.data_dir)
     cfg.root.mkdir(parents=True, exist_ok=True)
     cfg.logs_dir.mkdir(parents=True, exist_ok=True)
+    cfg.errors_dir.mkdir(parents=True, exist_ok=True)
 
     writer = Writer(cfg)
     writer.start()

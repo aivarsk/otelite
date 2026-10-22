@@ -42,6 +42,10 @@ class Config:
     def logs_dir(self):
         return self.root / "logs"
 
+    @property
+    def errors_dir(self):
+        return self.root / "errors"
+
     @classmethod
     def from_env(cls, port=None, data_dir=None):
         cfg = cls(root=data_dir or default_data_dir())

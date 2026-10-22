@@ -21,6 +21,7 @@ Shapes, in one breath:
   match is dropped and recreated empty. Dev data is disposable.
 
 Log files have their own format, documented on LogSink in logsio.py.
+Sentry error files have theirs, documented at the top of sentryio.py.
 """
 
 import hashlib

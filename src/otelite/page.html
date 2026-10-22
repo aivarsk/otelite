@@ -110,6 +110,17 @@ footer { padding:8px 16px; color:var(--gray); font-size:12px; display:flex; just
     <div id="log-lines">loading...</div>
   </section>
   <section>
+    <h2>Errors <span class="path">GET /grep/errors, /grep/errors/series</span></h2>
+    <div id="err-chart"></div>
+    <div id="err-kind" class="legend" style="margin:6px 0"></div>
+    <div class="filters">
+      <input id="err-service" placeholder="service">
+      <input id="err-q" placeholder="grep...">
+      <button id="err-apply">grep</button>
+    </div>
+    <div id="error-list">loading...</div>
+  </section>
+  <section>
     <h2>Services <span class="path">GET /perl/stats</span></h2>
     <div id="stats">loading...</div>
   </section>
@@ -118,7 +129,7 @@ footer { padding:8px 16px; color:var(--gray); font-size:12px; display:flex; just
 <script src="/static/uplot.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
-const state = { fromMs: Date.now() - 3600e3, toMs: Date.now(), metrics: null, selected: new Set(), metricCharts: [], logChart: null, sevHidden: new Set(), logData: [] };
+const state = { fromMs: Date.now() - 3600e3, toMs: Date.now(), metrics: null, selected: new Set(), metricCharts: [], logChart: null, sevHidden: new Set(), logData: [], errChart: null, kindHidden: new Set(), errorData: [] };
 // grafana style: the range lives in the URL, so a copied or duplicated tab
 // carries it. load it first if present and sane.
 {
@@ -168,7 +179,7 @@ async function getJson(path, params) {
 async function refreshAll() {
   syncRangeInputs();
   syncUrl();
-  loadTraces(); loadLogs(); loadLogsChart(); loadStats(); loadMetricList();
+  loadTraces(); loadLogs(); loadLogsChart(); loadErrors(); loadErrorsChart(); loadStats(); loadMetricList();
 }
 
 function rangeInputValue(ms) {
@@ -500,6 +511,52 @@ async function loadLogsChart() {
 }
 
 function reloadLogs() { loadLogs(); loadLogsChart(); }
+
+// errors get the same timeline chart as logs, one line per exception kind;
+// the kind legend chips hide both the line and the matching group rows
+async function loadErrorsChart() {
+  const host = $("err-chart");
+  try {
+    const data = await getJson("/grep/errors/series", errFilterParams());
+    if (state.errChart) { state.errChart.destroy(); state.errChart = null; }
+    host.innerHTML = "";
+    const totals = {};
+    for (const name in data.kinds) totals[name] = data.kinds[name].reduce((a, b) => a + b, 0);
+    const names = Object.keys(data.kinds).sort((a, b) => totals[b] - totals[a]);
+    if (!names.length) return;
+    const n = data.kinds[names[0]].length;
+    const xs = Array.from({ length: n }, (_, i) => (data.from_ms + i * data.bucket_ms) / 1000);
+    const columns = [xs, ...names.map(name => data.kinds[name])];
+    const u = new uPlot({
+      width: Math.max(host.clientWidth, 320),
+      height: 140,
+      scales: { x: { time: true } },
+      cursor: { drag: { x: true, y: false } },
+      legend: { show: false },
+      series: [
+        { label: "time" },
+        ...names.map((name, i) => ({ label: name, stroke: COLORS[i % COLORS.length], width: 1.5 })),
+      ],
+      axes: PLOT_AXES,
+      hooks: { setSelect: [onBrush] },
+    }, columns, host);
+    state.errChart = u;
+    $("err-kind").innerHTML = names.map((name, i) => {
+      const hidden = state.kindHidden.has(name);
+      return `<span data-i="${i + 1}" data-name="${esc(name)}" title="toggle ${esc(name)}"` +
+        ` style="cursor:pointer;${hidden ? "opacity:.35;text-decoration:line-through" : ""}">` +
+        `<span style="color:${COLORS[i % COLORS.length]}">${esc(name)}</span> ${totals[name]}</span>`;
+    }).join(" ");
+    $("err-kind").querySelectorAll("span[data-i]").forEach(chip => chip.onclick = () => {
+      const name = chip.dataset.name;
+      if (state.kindHidden.has(name)) state.kindHidden.delete(name); else state.kindHidden.add(name);
+      u.setSeries(+chip.dataset.i, { show: !state.kindHidden.has(name) });
+      chip.style.opacity = state.kindHidden.has(name) ? ".35" : "1";
+      chip.style.textDecoration = state.kindHidden.has(name) ? "line-through" : "none";
+      renderErrorList();
+    });
+  } catch (e) { host.textContent = e.message; }
+}
 $("log-apply").onclick = reloadLogs;
 $("log-q").addEventListener("keydown", e => { if (e.key === "Enter") reloadLogs(); });
 async function loadLogs() {
@@ -544,12 +601,86 @@ function sevClass(sev) {
   return "dim";
 }
 
+function errFilterParams() {
+  const params = { from: state.fromMs, to: state.toMs };
+  const svc = $("err-service").value.trim(); if (svc) params.service = svc;
+  const q = $("err-q").value.trim(); if (q) params.q = q;
+  return params;
+}
+
+function reloadErrors() { loadErrors(); loadErrorsChart(); }
+$("err-apply").onclick = reloadErrors;
+$("err-q").addEventListener("keydown", e => { if (e.key === "Enter") reloadErrors(); });
+async function loadErrors() {
+  try {
+    const data = await getJson("/grep/errors", errFilterParams());
+    state.errorData = data.errors;
+    renderErrorList();
+  } catch (e) { $("error-list").textContent = e.message; }
+}
+
+function renderErrorList() {
+  const visible = state.errorData.filter(g => !state.kindHidden.has(g.kind || "unknown"));
+  const note = visible.length !== state.errorData.length
+    ? ` <span class="dim">(${visible.length} of ${state.errorData.length}, kind filter)</span>` : "";
+  const rows = visible.map(g =>
+    `<tr class="clickable">
+      <td>${g.count}</td><td>${fmtDay(g.last_ms)}</td>
+      <td class="${/error|fatal/i.test(g.level || "error") ? "err" : "warn"}">${esc(g.kind || g.level || "?")}</td>
+      <td class="logbody">${esc(g.value || g.message)}</td>
+      <td class="dim">${esc(g.services.join(", "))}</td>
+      <td class="dim">${esc(g.releases.join(", "))}</td>
+    </tr>`).join("");
+  $("error-list").innerHTML = state.errorData.length
+    ? `<table><thead><tr><th>count</th><th>last</th><th>kind</th><th>error</th><th>service</th><th>release</th></tr></thead><tbody>` +
+      rows + `</tbody></table>` + note
+    : "no sentry errors in range";
+  const clickable = $("error-list").querySelectorAll("tr.clickable");
+  visible.forEach((g, i) => clickable[i].onclick = () => toggleErrorRow(clickable[i], g));
+}
+
+function toggleErrorRow(tr, g) {
+  const next = tr.nextElementSibling;
+  if (next && next.classList.contains("trace-detail")) { next.remove(); return; }
+  document.querySelectorAll("#error-list .trace-detail").forEach(e => e.remove());
+  const detail = document.createElement("tr");
+  detail.className = "trace-detail";
+  detail.innerHTML = '<td colspan="6"><div class="inline-trace"></div></td>';
+  tr.after(detail);
+  renderErrorDetail(g, detail.querySelector(".inline-trace"));
+}
+
+// the drill-down is the latest occurrence: exception chain with stacktrace
+// frames, then a trace link into the waterfall when the SDK was bridged to OTEL
+function renderErrorDetail(g, host) {
+  const ev = g.event || {};
+  const parts = [`<div class="dim">${g.count} occurrence(s), latest shown - group ${esc(g.group)}` +
+    (g.services.length ? ` - ${esc(g.services.join(", "))}` : "") + `</div>`];
+  const exceptions = (ev.exception && ev.exception.values) || [];
+  for (const e of exceptions) {
+    parts.push(`<div><b>${esc(e.type || "error")}</b>: ${esc(e.value || "")}</div>`);
+    const frames = (e.stacktrace && e.stacktrace.frames) || [];
+    if (frames.length) {
+      parts.push(`<div class="mono" style="margin:4px 0;white-space:pre-wrap;font-size:12px">` +
+        frames.map(f => `  at ${esc(f.function || "?")} (${esc(f.filename || f.module || "?")}:${f.lineno || 0})` +
+          (f.in_app ? ' <span class="err">app</span>' : "")).join("\n") + `</div>`);
+    }
+  }
+  if (!exceptions.length) parts.push(`<div>${esc(g.message)}</div>`);
+  if (g.trace_id) parts.push(`<div>trace <a data-trace="${esc(g.trace_id)}">${esc(g.trace_id.slice(0, 8))}</a></div>`);
+  parts.push(`<div class="err-trace"></div>`);
+  parts.push(`<div class="dim mono" style="white-space:pre-wrap;font-size:11px;max-height:200px;overflow:auto">${esc(JSON.stringify(ev, null, 1))}</div>`);
+  host.innerHTML = parts.join("");
+  const link = host.querySelector("a[data-trace]");
+  if (link) link.onclick = () => showTrace(g.trace_id, host.querySelector(".err-trace"));
+}
+
 async function loadStats() {
   try {
     const data = await getJson("/perl/stats", { from: state.fromMs, to: state.toMs });
     $("stats").innerHTML = data.services.length
-      ? `<table><thead><tr><th>service</th><th>spans</th><th>errors</th><th>metric samples</th><th>logs</th></tr></thead><tbody>` +
-        data.services.map(s => `<tr><td>${esc(s.service)}</td><td>${s.spans}</td><td class="${s.errors ? "err" : ""}">${s.errors}</td><td>${s.samples}</td><td>${s.logs}</td></tr>`).join("") + "</tbody></table>"
+      ? `<table><thead><tr><th>service</th><th>spans</th><th>errors</th><th>metric samples</th><th>logs</th><th>sentry</th></tr></thead><tbody>` +
+        data.services.map(s => `<tr><td>${esc(s.service)}</td><td>${s.spans}</td><td class="${s.errors ? "err" : ""}">${s.errors}</td><td>${s.samples}</td><td>${s.logs}</td><td class="${s.sentry ? "err" : ""}">${s.sentry}</td></tr>`).join("") + "</tbody></table>"
       : "nothing in range";
   } catch (e) { $("stats").textContent = e.message; }
 }

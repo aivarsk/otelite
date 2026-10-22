@@ -2,10 +2,11 @@ import asyncio
 import gzip
 import json
 import pkgutil
+import re
 import time
 import urllib.parse
 
-from . import api, normalize
+from . import api, normalize, sentryio
 
 MAX_HEADER_BYTES = 64 * 1024
 
@@ -26,6 +27,10 @@ SIGNALS = {
     "/v1/metrics": ("metrics", lambda payload, received_ns: normalize.metrics_from(payload)),
     "/v1/logs": ("logs", lambda payload, received_ns: normalize.log_records_from(payload)),
 }
+
+# Sentry SDKs POST to <dsn-path>/api/<project_id>/store/ or .../envelope/;
+# the dsn path prefix is optional and the project id is ours to ignore.
+SENTRY_PATH = re.compile(r"^(.*/)?api/([^/]+)/(store|envelope)/?$")
 
 JSON_TYPE = "application/json"
 HTML_TYPE = "text/html; charset=utf-8"
@@ -134,31 +139,54 @@ def asset(name):
     return _ASSETS[name]
 
 
-_ASSETS = {}
+def _asset_cache():
+    return {}
+
+
+_ASSETS = _asset_cache()
 
 
 def make_routes(cfg, writer):
-    def route(method, target, body):
+    def route(method, target, body, headers):
         path, params = _query(target)
         if method == "GET":
             return _get(path, params)
         if path == "/healthz":
             return _json(200, {"status": "ok"})
         signal = SIGNALS.get(path)
-        if signal is None:
-            return _json(404, {"message": f"no route for {method} {path}"})
-        if method != "POST":
-            return _json(405, {"message": "POST only"})
+        if signal is not None:
+            if method != "POST":
+                return _json(405, {"message": "POST only"})
+            try:
+                payload = json.loads(body)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                return _json(400, {"message": "invalid json"})
+            if not isinstance(payload, dict):
+                return _json(400, {"message": "payload must be a JSON object"})
+            kind, parse = signal
+            rows = parse(payload, time.time_ns())
+            if writer.submit((kind, rows)):
+                return _json(200, {})
+            return _json(429, {"message": "queue full, retry later"}, {"Retry-After": "1"})
+        sentry = SENTRY_PATH.match(path)
+        if sentry is not None:
+            if method != "POST":
+                return _json(405, {"message": "POST only"})
+            return _sentry(sentry.group(2), sentry.group(3), body, headers)
+        return _json(404, {"message": f"no route for {method} {path}"})
+
+    def _sentry(project, endpoint, body, headers):
+        key = sentryio.parse_auth(headers.get("x-sentry-auth", ""))
         try:
-            payload = json.loads(body)
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return _json(400, {"message": "invalid json"})
-        if not isinstance(payload, dict):
-            return _json(400, {"message": "payload must be a JSON object"})
-        kind, parse = signal
-        rows = parse(payload, time.time_ns())
-        if writer.submit((kind, rows)):
-            return _json(200, {})
+            if endpoint == "store":
+                records = sentryio.records_from_store(project, body, key, time.time_ns())
+            else:
+                records = sentryio.records_from_envelope(project, body, key, time.time_ns())
+        except (ValueError, UnicodeDecodeError):
+            return _json(400, {"message": "invalid sentry payload"})
+        if writer.submit(("errors", records)):
+            event_id = records[0]["event_id"] if records else ""
+            return _json(200, {"id": event_id})
         return _json(429, {"message": "queue full, retry later"}, {"Retry-After": "1"})
 
     def _get(path, params):
@@ -192,9 +220,13 @@ def make_routes(cfg, writer):
             return _json(200, api.logs(cfg, from_ms, to_ms, service, params.get("q") or None))
         if path == "/grep/logs/series":
             return _json(200, api.logs_series(cfg, from_ms, to_ms, service, params.get("q") or None))
+        if path == "/grep/errors":
+            return _json(200, api.errors(cfg, from_ms, to_ms, service, params.get("q") or None))
+        if path == "/grep/errors/series":
+            return _json(200, api.errors_series(cfg, from_ms, to_ms, service, params.get("q") or None))
         if path == "/perl/stats":
             return _json(200, api.stats(cfg, from_ms, to_ms))
-        if path in SIGNALS:
+        if path in SIGNALS or SENTRY_PATH.match(path):
             return _json(405, {"message": "POST only"})
         return _json(404, {"message": f"no route for GET {path}"})
 
@@ -208,7 +240,7 @@ async def handle_conn(reader, writer, cfg, route):
             if request is None:
                 break
             method, target, headers, body = request
-            code, payload, content_type, extra = route(method, target, body)
+            code, payload, content_type, extra = route(method, target, body, headers)
             client_close = headers.get("connection", "").lower() == "close"
             await _write_response(writer, code, payload, content_type, client_close, extra)
             if client_close:

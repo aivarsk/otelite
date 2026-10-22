@@ -80,6 +80,11 @@
   </section>
 
   <section class="mb-5">
+    <h2>Sentry errors</h2>
+    <p>Sentry is the right tool for prod and preprod. Test and CI runs either fill the issue stream with garbage or get no Sentry at all, because a real instance per run means Kafka, ClickHouse, and Postgres per CI job. OTELite takes the error events as files on the same port, grouped by exception kind, next to the traces and logs from the same run. No transactions, no replays, no issue workflow, nothing but the errors.</p>
+  </section>
+
+  <section class="mb-5">
     <h2>How it works</h2>
     <ol>
       <li>Point your OTEL SDK or collector at OTELite, OTLP/HTTP on port 4318.</li>
@@ -104,6 +109,21 @@ EOF</pre>
   </section>
 
   <section class="mb-5">
+    <h2>Your first error is one curl too</h2>
+    <p>The Sentry endpoints take plain JSON on the same port: no SDK, no envelope, no key worth checking.</p>
+    <div class="install p-3 mt-2">
+      <pre class="mono">curl -s -X POST localhost:4318/api/42/store/ \
+  -H 'Content-Type: application/json' -d '{
+  "event_id": "5b8efff798038103d269b633813fc60c",
+  "timestamp": "'$(date -Iseconds)'",
+  "level": "error",
+  "exception": {"values": [{"type": "DemoError", "value": "hello from curl"}]}
+}'</pre>
+    </div>
+    <p class="mt-2">The answer is <span class="mono">{"id":"5b8efff798038103d269b633813fc60c"}</span>, and the error is on the page, grouped under DemoError next to your span's logs.</p>
+  </section>
+
+  <section class="mb-5">
     <h2>The files are the API</h2>
     <p><span class="mono">otelite.sqlite</span> holds traces and metrics: a <span class="mono">spans</span> table (ids, service, times, and status as columns; attributes, events, and links as JSON), and a <span class="mono">samples</span> table (ms timestamp, metric, label set, service, value) with small dictionary tables for metric names and label sets. <span class="mono">logs/&lt;day&gt;/&lt;service&gt;.jsonl</span> holds one flattened record per line:</p>
     <div class="install p-3 mt-2">
@@ -120,6 +140,7 @@ EOF</pre>
       <li>OTLP/HTTP with JSON bodies on port 4318. gzip accepted. 200 {} means accepted; a full queue answers 429 with Retry-After and the SDK retries.</li>
       <li>gRPC on 4317 is not supported. Point SDKs and the collector at <span class="mono">http://localhost:4318</span>.</li>
       <li>Binary protobuf is later. JSON is the protocol here.</li>
+      <li>Sentry error events ride the same port: store and envelope endpoints under <span class="mono">/api/&lt;project&gt;/</span>, any project id, any key, nothing verified. Errors land as JSONL files next to the logs and group by exception kind on the page.</li>
     </ul>
   </section>
 
@@ -142,7 +163,7 @@ EOF</pre>
 
   <section class="mb-5">
     <h2>On a server, in CI</h2>
-    <p>The binary does not care where it runs. Start the same zipapp on a test box or as a CI service, set <span class="mono">OTEL_EXPORTER_OTLP_ENDPOINT</span> to its address (in a compose network that is <span class="mono">http://otelite:4318</span>), and keep the data directory as the artifact you inspect after the run. A Dockerfile and a docker-compose sample ship in the repo, plain HTTP on a dev network, an SSH tunnel does for the page.</p>
+    <p>The binary does not care where it runs. Start the same zipapp on a test box or as a CI service and point both kinds of exporters at it: <span class="mono">OTEL_EXPORTER_OTLP_ENDPOINT=http://otelite:4318</span> for OTEL SDKs and the collector, <span class="mono">SENTRY_DSN=http://mykey@otelite:4318/42</span> for Sentry SDKs. Keep the data directory as the artifact you inspect after the run. A Dockerfile and a docker-compose sample ship in the repo, plain HTTP on a dev network, an SSH tunnel does for the page.</p>
   </section>
 </main>
 

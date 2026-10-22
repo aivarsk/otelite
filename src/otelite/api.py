@@ -7,7 +7,12 @@ from . import db
 
 MAX_TRACES = 200
 MAX_LOG_LINES = 1000
+MAX_ERROR_RECORDS = 5000
 MAX_SERIES_POINTS = 5000
+
+
+def _dict():
+    return {}
 
 
 def _connect(cfg):
@@ -148,13 +153,13 @@ def series(cfg, metric_ids, from_ms, to_ms):
     }
 
 
-def _scan_log_records(cfg, from_ms, to_ms, service=None, q=None):
+def _scan_day_records(records_dir, from_ms, to_ms, service=None, q=None):
     needle = q.lower() if q else None
     start_day = datetime.fromtimestamp(from_ms / 1000, timezone.utc).date()
     end_day = datetime.fromtimestamp(to_ms / 1000, timezone.utc).date()
     day = start_day
     while day <= end_day:
-        day_dir = Path(cfg.logs_dir) / day.isoformat()
+        day_dir = Path(records_dir) / day.isoformat()
         if day_dir.is_dir():
             if service:
                 files = [day_dir / f"{service}.jsonl"]
@@ -180,7 +185,7 @@ def _scan_log_records(cfg, from_ms, to_ms, service=None, q=None):
 
 def logs(cfg, from_ms, to_ms, service=None, q=None):
     # global timeline: interleave services by record time, cap keeps the earliest lines
-    matches = sorted(_scan_log_records(cfg, from_ms, to_ms, service, q), key=lambda item: item[0])
+    matches = sorted(_scan_day_records(cfg.logs_dir, from_ms, to_ms, service, q), key=lambda item: item[0])
     return {
         "logs": [
             {
@@ -201,7 +206,7 @@ def logs_series(cfg, from_ms, to_ms, service=None, q=None, buckets=120):
     bucket_ms = max(-(-span_ms // buckets), 1)
     count = max(-(-span_ms // bucket_ms), 1)
     severities = {}
-    for ts_ms, record in _scan_log_records(cfg, from_ms, to_ms, service, q):
+    for ts_ms, record in _scan_day_records(cfg.logs_dir, from_ms, to_ms, service, q):
         severity = record.get("severity_text", "") or "UNSPECIFIED"
         if severity not in severities:
             severities[severity] = [0] * count
@@ -213,6 +218,104 @@ def logs_series(cfg, from_ms, to_ms, service=None, q=None, buckets=120):
         "to_ms": to_ms,
         "bucket_ms": bucket_ms,
         "severities": severities,
+    }
+
+
+def errors(cfg, from_ms, to_ms, service=None, q=None):
+    # Sentry errors grouped the way Sentry does: one row per group (client
+    # fingerprint or exception type plus stacktrace), the latest occurrence
+    # riding along for the drill-down, sorted by hit count
+    matches = sorted(_scan_day_records(cfg.errors_dir, from_ms, to_ms, service, q), key=lambda item: item[0])
+    groups = _dict()
+    for ts_ms, record in matches[:MAX_ERROR_RECORDS]:
+        key = record.get("group") or record.get("event_id") or str(ts_ms)
+        group = groups.get(key)
+        if group is None:
+            group = groups[key] = {
+                "group": key,
+                "kind": record.get("kind", ""),
+                "value": record.get("value", ""),
+                "message": record.get("message", ""),
+                "level": record.get("level", ""),
+                "count": 0,
+                "first_ms": ts_ms,
+                "last_ms": ts_ms,
+                "services": set(),
+                "releases": set(),
+                "trace_id": record.get("trace_id", ""),
+                "event": record,
+            }
+        group["count"] += 1
+        group["first_ms"] = min(group["first_ms"], ts_ms)
+        group["last_ms"] = max(group["last_ms"], ts_ms)
+        group["services"].add(record.get("service_name", ""))
+        group["releases"].add(record.get("release", ""))
+        if record.get("trace_id"):
+            group["trace_id"] = record["trace_id"]
+        if ts_ms >= group["last_ms"]:
+            group["event"] = record
+    ordered = sorted(groups.values(), key=lambda g: (-g["count"], g["kind"], g["message"]))
+    return {
+        "errors": [
+            {
+                "group": g["group"],
+                "kind": g["kind"],
+                "value": g["value"],
+                "message": g["message"],
+                "level": g["level"],
+                "count": g["count"],
+                "first_ms": g["first_ms"],
+                "last_ms": g["last_ms"],
+                "services": sorted(s for s in g["services"] if s),
+                "releases": sorted(s for s in g["releases"] if s),
+                "trace_id": g["trace_id"],
+                "event": g["event"].get("event", {}),
+            }
+            for g in ordered
+        ]
+    }
+
+
+def _count_day_records(records_dir, from_ms, to_ms):
+    counts = _dict()
+    start_day = datetime.fromtimestamp(from_ms / 1000, timezone.utc).date()
+    end_day = datetime.fromtimestamp(to_ms / 1000, timezone.utc).date()
+    day = start_day
+    while day <= end_day:
+        day_dir = Path(records_dir) / day.isoformat()
+        if day_dir.is_dir():
+            for path in day_dir.glob("*.jsonl"):
+                service = path.stem
+                with open(path, encoding="utf-8") as handle:
+                    for line in handle:
+                        try:
+                            record = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        ts_ms = record.get("time_unix_nano", 0) // 1_000_000
+                        if from_ms <= ts_ms <= to_ms:
+                            counts[service] = counts.get(service, 0) + 1
+        day += timedelta(days=1)
+    return counts
+
+
+def errors_series(cfg, from_ms, to_ms, service=None, q=None, buckets=120):
+    span_ms = max(to_ms - from_ms, 1)
+    bucket_ms = max(-(-span_ms // buckets), 1)
+    count = max(-(-span_ms // bucket_ms), 1)
+    kinds = _dict()
+    for ts_ms, record in _scan_day_records(cfg.errors_dir, from_ms, to_ms, service, q):
+        kind = record.get("kind") or "unknown"
+        if kind not in kinds:
+            kinds[kind] = [0] * count
+        series = kinds[kind]
+        index = (ts_ms - from_ms) // bucket_ms
+        series[min(max(index, 0), count - 1)] += 1
+    return {
+        "from_ms": from_ms,
+        "to_ms": to_ms,
+        "bucket_ms": bucket_ms,
+        "kinds": kinds,
     }
 
 
@@ -236,29 +339,10 @@ def stats(cfg, from_ms, to_ms):
         services[name] = {"spans": count, "errors": errors}
     for name, count in sample_rows:
         services.setdefault(name, {})["samples"] = count
-    log_count = {}
-    start_day = datetime.fromtimestamp(from_ms / 1000, timezone.utc).date()
-    end_day = datetime.fromtimestamp(to_ms / 1000, timezone.utc).date()
-    day = start_day
-    while day <= end_day:
-        day_dir = Path(cfg.logs_dir) / day.isoformat()
-        if day_dir.is_dir():
-            for path in day_dir.glob("*.jsonl"):
-                service = path.stem
-                with open(path, encoding="utf-8") as handle:
-                    for line in handle:
-                        try:
-                            record = json.loads(line)
-                        except json.JSONDecodeError:
-                            continue
-                        ts_ms = record.get("time_unix_nano", 0) // 1_000_000
-                        if from_ms <= ts_ms <= to_ms:
-                            if service not in log_count:
-                                log_count[service] = 0
-                            log_count[service] += 1
-        day += timedelta(days=1)
-    for name, count in log_count.items():
+    for name, count in _count_day_records(cfg.logs_dir, from_ms, to_ms).items():
         services.setdefault(name, {})["logs"] = count
+    for name, count in _count_day_records(cfg.errors_dir, from_ms, to_ms).items():
+        services.setdefault(name, {})["sentry"] = count
     return {
         "services": [
             {
@@ -267,6 +351,7 @@ def stats(cfg, from_ms, to_ms):
                 "errors": values.get("errors", 0),
                 "samples": values.get("samples", 0),
                 "logs": values.get("logs", 0),
+                "sentry": values.get("sentry", 0),
             }
             for name, values in sorted(services.items())
         ]

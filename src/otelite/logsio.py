@@ -9,7 +9,9 @@ class LogSink:
     One flattened JSON record per line, nanosecond timestamps, trace and
     span ids kept as hex strings so `grep <trace-id> logs/` is the trace
     join. No compression, ever: bare grep is the whole toolchain. A crash
-    may leave a partial last line; readers skip unparseable tails.
+    may leave a partial last line; readers skip unparseable tails. The same
+    sink serves the errors/ tree (one sink per directory); the Sentry error
+    record shape is documented at the top of sentryio.py.
     """
 
     def __init__(self, root):
