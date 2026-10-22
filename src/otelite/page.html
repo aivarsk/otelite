@@ -209,7 +209,13 @@ $("ranges").addEventListener("click", (e) => {
 $("apply-custom").onclick = () => {
   const f = parseDate($("from-ts").value), t = parseDate($("to-ts").value);
   if (isNaN(f) || isNaN(t)) { alert("use YYYY-MM-DD HH:mm (24h)"); return; }
-  state.fromMs = f; state.toMs = t;
+  // the boxes render at minute precision; when they still show the current
+  // range (preset click, no edits) keep the exact range instead of
+  // snapping it backwards by up to a minute
+  if ($("from-ts").value.trim() !== rangeInputValue(state.fromMs) ||
+      $("to-ts").value.trim() !== rangeInputValue(state.toMs)) {
+    state.fromMs = f; state.toMs = t;
+  }
   document.querySelectorAll("#ranges button[data-min]").forEach(b => b.classList.remove("active"));
   refreshAll();
 };

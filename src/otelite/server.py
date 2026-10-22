@@ -191,13 +191,13 @@ def make_routes(cfg, writer):
 
     def _get(path, params):
         if path == "/":
-            return 200, asset("page.html"), HTML_TYPE, {}
+            return 200, asset("page.html"), HTML_TYPE, {"Cache-Control": "no-cache"}
         if path == "/healthz":
             return _json(200, {"status": "ok"})
         if path == "/static/uplot.js":
-            return 200, asset("uplot.iife.min.js"), "text/javascript; charset=utf-8", {}
+            return 200, asset("uplot.iife.min.js"), "text/javascript; charset=utf-8", {"Cache-Control": "no-cache"}
         if path == "/static/uplot.css":
-            return 200, asset("uplot.min.css"), "text/css; charset=utf-8", {}
+            return 200, asset("uplot.min.css"), "text/css; charset=utf-8", {"Cache-Control": "no-cache"}
         from_ms, to_ms = _range(params)
         service = params.get("service") or None
         if path == "/strace/traces":
