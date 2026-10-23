@@ -65,6 +65,8 @@ class ServerThread:
         asyncio.set_event_loop(self.loop)
         try:
             self.loop.run_until_complete(serve(self.cfg, self.writer))
+        except asyncio.CancelledError:
+            pass  # stop() cancels the serve_forever task; that is the normal exit
         except Exception as exc:  # surfaced by start() and visible in output
             self.error = exc
             print(f"server thread died: {exc!r}")

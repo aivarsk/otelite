@@ -12,15 +12,11 @@ MAX_SERIES_POINTS = 5000
 
 
 def _dict():
-    return {}
+    return dict()
 
 
 def _connect(cfg):
     return db.connect(cfg.db_path)
-
-
-def _ms(ns):
-    return ns // 1_000_000
 
 
 def traces(cfg, from_ms, to_ms, service=None):
@@ -48,8 +44,8 @@ def traces(cfg, from_ms, to_ms, service=None):
         "traces": [
             {
                 "trace_id": row[0].hex(),
-                "start_ms": _ms(row[1]),
-                "duration_ms": _ms(row[2]),
+                "start_ms": row[1] // 1_000_000,
+                "duration_ms": row[2] // 1_000_000,
                 "spans": row[3],
                 "errors": row[4],
                 "root": row[5] or "",
@@ -85,8 +81,8 @@ def trace(cfg, trace_id_hex):
                 "status_code": row[4],
                 "status_msg": row[5],
                 "service": row[6],
-                "start_ms": _ms(row[7]),
-                "duration_ms": _ms(row[8] - row[7]),
+                "start_ms": row[7] // 1_000_000,
+                "duration_ms": (row[8] - row[7]) // 1_000_000,
                 "attrs": json.loads(row[9] or "{}"),
                 "events": json.loads(row[10] or "[]"),
             }
