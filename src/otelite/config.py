@@ -25,7 +25,14 @@ def default_data_dir():
 
 class Config:
     def __init__(
-        self, root, port=4318, max_body_bytes=32 * 1024 * 1024, queue_size=10000, batch_size=1000, flush_ms=1000
+        self,
+        root,
+        port=4318,
+        max_body_bytes=32 * 1024 * 1024,
+        queue_size=10000,
+        batch_size=1000,
+        flush_ms=1000,
+        archive=None,
     ):
         self.root = root
         self.port = port
@@ -33,6 +40,7 @@ class Config:
         self.queue_size = queue_size
         self.batch_size = batch_size
         self.flush_ms = flush_ms
+        self.archive = archive
 
     @property
     def db_path(self):

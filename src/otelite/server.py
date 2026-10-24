@@ -13,6 +13,7 @@ MAX_HEADER_BYTES = 64 * 1024
 REASONS = {
     200: "OK",
     400: "Bad Request",
+    403: "Forbidden",
     404: "Not Found",
     405: "Method Not Allowed",
     411: "Length Required",
@@ -153,6 +154,8 @@ def make_routes(cfg, writer):
             return _get(path, params)
         if path == "/healthz":
             return _json(200, {"status": "ok"})
+        if cfg.archive and method == "POST":
+            return _json(403, {"message": "read-only archive mode, ingestion is disabled"})
         signal = SIGNALS.get(path)
         if signal is not None:
             if method != "POST":

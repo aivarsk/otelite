@@ -163,7 +163,7 @@ EOF</pre>
 
   <section class="mb-5">
     <h2>On a server, in CI</h2>
-    <p>The binary does not care where it runs. Start the same zipapp on a test box or as a CI service and point both kinds of exporters at it: <span class="mono">OTEL_EXPORTER_OTLP_ENDPOINT=http://otelite:4318</span> for OTEL SDKs and the collector, <span class="mono">SENTRY_DSN=http://mykey@otelite:4318/42</span> for Sentry SDKs. Keep the data directory as the artifact you inspect after the run. A Dockerfile and a docker-compose sample ship in the repo, plain HTTP on a dev network, an SSH tunnel does for the page.</p>
+    <p>The binary does not care where it runs. Start the same zipapp on a test box or as a CI service and point both kinds of exporters at it: <span class="mono">OTEL_EXPORTER_OTLP_ENDPOINT=http://otelite:4318</span> for OTEL SDKs and the collector, <span class="mono">SENTRY_DSN=http://mykey@otelite:4318/42</span> for Sentry SDKs. Keep the data directory as the artifact you inspect after the run. Seal it by archiving the directory (<span class="mono">tar czf run.tgz -C $OTELITE_DATA_DIR .</span>); anyone can replay the run later with <span class="mono">otelite --archive run.tgz</span>, a read-only viewer that refuses all ingestion. A Dockerfile and a docker-compose sample ship in the repo, plain HTTP on a dev network, an SSH tunnel does for the page.</p>
   </section>
 </main>
 

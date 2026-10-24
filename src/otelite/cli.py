@@ -2,10 +2,11 @@ import argparse
 import asyncio
 import logging
 import os
+import shutil
 import threading
 from pathlib import Path
 
-from . import demo
+from . import archiveio, demo
 from .config import APP_VERSION, Config
 from .server import serve
 from .writer import Writer
@@ -22,6 +23,12 @@ def main(argv=None):
     parser.add_argument("--verbose", action="store_true", help="debug logging")
     parser.add_argument("--version", action="store_true", help="show version and data locations")
     parser.add_argument("--demo", action="store_true", help="generate demo telemetry into this instance")
+    parser.add_argument(
+        "--archive",
+        type=Path,
+        default=None,
+        help="serve a zipped or tarred otelite data directory read-only; ingestion is disabled",
+    )
     args = parser.parse_args(argv)
 
     if args.version:
@@ -37,6 +44,23 @@ def main(argv=None):
     )
 
     cfg = Config.from_env(port=args.port, data_dir=args.data_dir)
+    extracted = None
+    if args.archive:
+        if args.demo:
+            parser.error("--demo cannot be combined with --archive")
+        if args.data_dir:
+            parser.error("--data-dir cannot be combined with --archive")
+        if not args.archive.is_file():
+            print(f"no such archive: {args.archive}")
+            return 2
+        try:
+            extracted = archiveio.extract(args.archive)
+        except ValueError as exc:
+            print(exc)
+            return 2
+        cfg.root = extracted
+        cfg.archive = str(args.archive)
+        print(f"serving {args.archive} read-only from {extracted}; ingestion is disabled")
     cfg.root.mkdir(parents=True, exist_ok=True)
     cfg.logs_dir.mkdir(parents=True, exist_ok=True)
     cfg.errors_dir.mkdir(parents=True, exist_ok=True)
@@ -52,4 +76,6 @@ def main(argv=None):
         pass
     finally:
         writer.stop()
+        if extracted is not None:
+            shutil.rmtree(extracted, ignore_errors=True)
     return 0

@@ -71,6 +71,21 @@ maps, alerts, and the issue workflow stay with Sentry. Test and CI produce
 errors; otelite keeps those, grouped by exception kind, in the run's own
 data directory, next to the traces and logs from the same run.
 
+## Sealed runs
+
+Archive the data directory at the end of a CI run and anyone holding the
+artifact can browse exactly what was collected, read-only:
+
+```bash
+tar czf run.tgz -C "$OTELITE_DATA_DIR" .
+# or: zip -r run.zip "$OTELITE_DATA_DIR"
+
+otelite --archive run.tgz    # read-only viewer on http://localhost:4318
+```
+
+The page, the read APIs, and `grep` work as usual; every OTLP and Sentry
+ingestion call is refused with 403.
+
 Browser SDKs: responses carry no CORS headers yet, so a browser SDK needs
 same-origin serving or a local proxy. Server-side SDKs (Python, Node, Go,
 Rust) just work.
