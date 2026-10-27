@@ -3,6 +3,7 @@ import queue
 import sqlite3
 import threading
 import time
+from contextlib import closing
 
 from . import db, logsio
 
@@ -47,23 +48,22 @@ class Writer:
         self._thread.join(timeout=5)
 
     def _run(self):
-        conn = db.connect(self.cfg.db_path)
-        stop = False
-        while not stop:
-            batch = _list()
-            deadline = time.monotonic() + self.cfg.flush_ms / 1000
-            while len(batch) < self.cfg.batch_size:
-                try:
-                    item = self.queue.get(timeout=max(deadline - time.monotonic(), 0))
-                except queue.Empty:
-                    break
-                if item is None:
-                    stop = True
-                    break
-                batch.append(item)
-            if batch:
-                self._flush(conn, batch)
-        conn.close()
+        with closing(db.connect(self.cfg.db_path)) as conn:
+            stop = False
+            while not stop:
+                batch = _list()
+                deadline = time.monotonic() + self.cfg.flush_ms / 1000
+                while len(batch) < self.cfg.batch_size:
+                    try:
+                        item = self.queue.get(timeout=max(deadline - time.monotonic(), 0))
+                    except queue.Empty:
+                        break
+                    if item is None:
+                        stop = True
+                        break
+                    batch.append(item)
+                if batch:
+                    self._flush(conn, batch)
         self.logs.close()
         self.errors.close()
 
@@ -99,8 +99,7 @@ class Writer:
     def _checkpoint_loop(self):
         while not self._stop.wait(self._checkpoint_interval_s):
             try:
-                conn = db.connect(self.cfg.db_path)
-                conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
-                conn.close()
+                with closing(db.connect(self.cfg.db_path)) as conn:
+                    conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
             except sqlite3.Error:
                 pass

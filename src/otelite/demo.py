@@ -9,6 +9,7 @@ import http.client
 import json
 import random
 import time
+from contextlib import closing
 from datetime import datetime, timezone
 
 SERVICES = {
@@ -22,15 +23,14 @@ DEMO_RELEASE = "demo-1.0.0"
 
 
 def post(host, port, path, payload, headers=None):
-    conn = http.client.HTTPConnection(host, port, timeout=5)
     body = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
     request_headers = {"Content-Type": "application/json"}
     request_headers.update(headers or {})
-    conn.request("POST", path, body=body, headers=request_headers)
-    response = conn.getresponse()
-    response.read()
-    conn.close()
-    return response.status
+    with closing(http.client.HTTPConnection(host, port, timeout=5)) as conn:
+        conn.request("POST", path, body=body, headers=request_headers)
+        response = conn.getresponse()
+        response.read()
+        return response.status
 
 
 def trace_batch(service, route, rng, now_ns, elapsed_ms, error):

@@ -1,5 +1,6 @@
 import collections
 import json
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -37,9 +38,8 @@ def traces(cfg, from_ms, to_ms, service=None):
         params.append(service)
     sql += " GROUP BY trace_id ORDER BY start_ns DESC LIMIT ?"
     params.append(MAX_TRACES)
-    conn = _connect(cfg)
-    rows = conn.execute(sql, params).fetchall()
-    conn.close()
+    with closing(_connect(cfg)) as conn:
+        rows = conn.execute(sql, params).fetchall()
     return {
         "traces": [
             {
@@ -61,16 +61,15 @@ def trace(cfg, trace_id_hex):
         trace_id = bytes.fromhex(trace_id_hex)
     except ValueError:
         return None
-    conn = _connect(cfg)
-    rows = conn.execute(
-        """
-        SELECT hex(span_id), hex(parent_id), name, kind, status_code, status_msg,
-               service_name, start_ns, end_ns, attrs, events
-        FROM spans WHERE trace_id = ? ORDER BY start_ns
-        """,
-        (trace_id,),
-    ).fetchall()
-    conn.close()
+    with closing(_connect(cfg)) as conn:
+        rows = conn.execute(
+            """
+            SELECT hex(span_id), hex(parent_id), name, kind, status_code, status_msg,
+                   service_name, start_ns, end_ns, attrs, events
+            FROM spans WHERE trace_id = ? ORDER BY start_ns
+            """,
+            (trace_id,),
+        ).fetchall()
     return {
         "spans": [
             {
@@ -92,16 +91,15 @@ def trace(cfg, trace_id_hex):
 
 
 def metrics(cfg):
-    conn = _connect(cfg)
-    rows = conn.execute(
-        """
-        SELECT m.id, m.name, m.kind, coalesce(m.unit, ''), coalesce(m.description, ''),
-               m.monotonic, count(s.ts)
-        FROM metrics m LEFT JOIN samples s ON s.metric_id = m.id
-        GROUP BY m.id ORDER BY m.name
-        """
-    ).fetchall()
-    conn.close()
+    with closing(_connect(cfg)) as conn:
+        rows = conn.execute(
+            """
+            SELECT m.id, m.name, m.kind, coalesce(m.unit, ''), coalesce(m.description, ''),
+                   m.monotonic, count(s.ts)
+            FROM metrics m LEFT JOIN samples s ON s.metric_id = m.id
+            GROUP BY m.id ORDER BY m.name
+            """
+        ).fetchall()
     groups = collections.defaultdict(list)
     for row in rows:
         key = (row[3], row[2])
@@ -129,9 +127,8 @@ def series(cfg, metric_ids, from_ms, to_ms):
     ORDER BY s.ts
     LIMIT {MAX_SERIES_POINTS}
     """
-    conn = _connect(cfg)
-    rows = conn.execute(sql, [*metric_ids, from_ms, to_ms]).fetchall()
-    conn.close()
+    with closing(_connect(cfg)) as conn:
+        rows = conn.execute(sql, [*metric_ids, from_ms, to_ms]).fetchall()
     grouped = collections.defaultdict(list)
     for metric_id, name, service, ts, value in rows:
         key = (metric_id, name, service)
@@ -316,20 +313,19 @@ def errors_series(cfg, from_ms, to_ms, service=None, q=None, buckets=120):
 
 
 def stats(cfg, from_ms, to_ms):
-    conn = _connect(cfg)
-    span_rows = conn.execute(
-        """
-        SELECT service_name, count(*), coalesce(sum(status_code = 2), 0)
-        FROM spans WHERE start_ns >= ? AND start_ns <= ?
-        GROUP BY service_name
-        """,
-        (from_ms * 1_000_000, to_ms * 1_000_000),
-    ).fetchall()
-    sample_rows = conn.execute(
-        "SELECT service_name, count(*) FROM samples WHERE ts >= ? AND ts <= ? GROUP BY service_name",
-        (from_ms, to_ms),
-    ).fetchall()
-    conn.close()
+    with closing(_connect(cfg)) as conn:
+        span_rows = conn.execute(
+            """
+            SELECT service_name, count(*), coalesce(sum(status_code = 2), 0)
+            FROM spans WHERE start_ns >= ? AND start_ns <= ?
+            GROUP BY service_name
+            """,
+            (from_ms * 1_000_000, to_ms * 1_000_000),
+        ).fetchall()
+        sample_rows = conn.execute(
+            "SELECT service_name, count(*) FROM samples WHERE ts >= ? AND ts <= ? GROUP BY service_name",
+            (from_ms, to_ms),
+        ).fetchall()
     services = {}
     for name, count, errors in span_rows:
         services[name] = {"spans": count, "errors": errors}
