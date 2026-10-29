@@ -146,7 +146,7 @@ def series(cfg, metric_ids, from_ms, to_ms):
     }
 
 
-def _scan_day_records(records_dir, from_ms, to_ms, service=None, q=None):
+def _iter_day_records(records_dir, from_ms, to_ms, service=None, q=None):
     needle = q.lower() if q else None
     start_day = datetime.fromtimestamp(from_ms / 1000, timezone.utc).date()
     end_day = datetime.fromtimestamp(to_ms / 1000, timezone.utc).date()
@@ -172,8 +172,13 @@ def _scan_day_records(records_dir, from_ms, to_ms, service=None, q=None):
                         ts_ms = record.get("time_unix_nano", 0) // 1_000_000
                         if ts_ms < from_ms or ts_ms > to_ms:
                             continue
-                        yield ts_ms, record
+                        yield ts_ms, path.stem, record
         day += timedelta(days=1)
+
+
+def _scan_day_records(records_dir, from_ms, to_ms, service=None, q=None):
+    for ts_ms, _service, record in _iter_day_records(records_dir, from_ms, to_ms, service, q):
+        yield ts_ms, record
 
 
 def logs(cfg, from_ms, to_ms, service=None, q=None):
@@ -194,24 +199,32 @@ def logs(cfg, from_ms, to_ms, service=None, q=None):
     }
 
 
-def logs_series(cfg, from_ms, to_ms, service=None, q=None, buckets=120):
+def _bucket_series(records_dir, from_ms, to_ms, service, q, key_of, result_key, buckets=120):
     span_ms = max(to_ms - from_ms, 1)
     bucket_ms = max(-(-span_ms // buckets), 1)
     count = max(-(-span_ms // bucket_ms), 1)
-    severities = {}
-    for ts_ms, record in _scan_day_records(cfg.logs_dir, from_ms, to_ms, service, q):
-        severity = record.get("severity_text", "") or "UNSPECIFIED"
-        if severity not in severities:
-            severities[severity] = [0] * count
-        series = severities[severity]
+    groups = _dict()
+    for ts_ms, record in _scan_day_records(records_dir, from_ms, to_ms, service, q):
+        key = key_of(record)
+        series = groups.get(key)
+        if series is None:
+            series = groups[key] = [0] * count
         index = (ts_ms - from_ms) // bucket_ms
         series[min(max(index, 0), count - 1)] += 1
-    return {
-        "from_ms": from_ms,
-        "to_ms": to_ms,
-        "bucket_ms": bucket_ms,
-        "severities": severities,
-    }
+    return {"from_ms": from_ms, "to_ms": to_ms, "bucket_ms": bucket_ms, result_key: groups}
+
+
+def logs_series(cfg, from_ms, to_ms, service=None, q=None, buckets=120):
+    return _bucket_series(
+        cfg.logs_dir,
+        from_ms,
+        to_ms,
+        service,
+        q,
+        lambda record: record.get("severity_text", "") or "UNSPECIFIED",
+        "severities",
+        buckets,
+    )
 
 
 def errors(cfg, from_ms, to_ms, service=None, q=None):
@@ -271,45 +284,22 @@ def errors(cfg, from_ms, to_ms, service=None, q=None):
 
 def _count_day_records(records_dir, from_ms, to_ms):
     counts = _dict()
-    start_day = datetime.fromtimestamp(from_ms / 1000, timezone.utc).date()
-    end_day = datetime.fromtimestamp(to_ms / 1000, timezone.utc).date()
-    day = start_day
-    while day <= end_day:
-        day_dir = Path(records_dir) / day.isoformat()
-        if day_dir.is_dir():
-            for path in day_dir.glob("*.jsonl"):
-                service = path.stem
-                with open(path, encoding="utf-8") as handle:
-                    for line in handle:
-                        try:
-                            record = json.loads(line)
-                        except json.JSONDecodeError:
-                            continue
-                        ts_ms = record.get("time_unix_nano", 0) // 1_000_000
-                        if from_ms <= ts_ms <= to_ms:
-                            counts[service] = counts.get(service, 0) + 1
-        day += timedelta(days=1)
+    for _ts_ms, service, _record in _iter_day_records(records_dir, from_ms, to_ms):
+        counts[service] = counts.get(service, 0) + 1
     return counts
 
 
 def errors_series(cfg, from_ms, to_ms, service=None, q=None, buckets=120):
-    span_ms = max(to_ms - from_ms, 1)
-    bucket_ms = max(-(-span_ms // buckets), 1)
-    count = max(-(-span_ms // bucket_ms), 1)
-    kinds = _dict()
-    for ts_ms, record in _scan_day_records(cfg.errors_dir, from_ms, to_ms, service, q):
-        kind = record.get("kind") or "unknown"
-        if kind not in kinds:
-            kinds[kind] = [0] * count
-        series = kinds[kind]
-        index = (ts_ms - from_ms) // bucket_ms
-        series[min(max(index, 0), count - 1)] += 1
-    return {
-        "from_ms": from_ms,
-        "to_ms": to_ms,
-        "bucket_ms": bucket_ms,
-        "kinds": kinds,
-    }
+    return _bucket_series(
+        cfg.errors_dir,
+        from_ms,
+        to_ms,
+        service,
+        q,
+        lambda record: record.get("kind") or "unknown",
+        "kinds",
+        buckets,
+    )
 
 
 def stats(cfg, from_ms, to_ms):

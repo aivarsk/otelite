@@ -63,17 +63,20 @@ def _hex_bytes(value, length):
     return raw if len(raw) == length else None
 
 
-def _scope_groups(scope_message):
-    groups = scope_message.get("scopeSpans") or scope_message.get("instrumentationLibrarySpans") or []
-    return groups
+def _walk(payload, plural):
+    # resource<plural> messages: resource attributes, service name, scope
+    # groups; instrumentationLibrary* is the pre-1.16 OTLP name
+    for message in payload.get("resource" + plural, []):
+        resource = _attrs_to_object(message.get("resource", {}).get("attributes", []))
+        service_name = str(resource.get("service.name", ""))
+        groups = message.get("scope" + plural) or message.get("instrumentationLibrary" + plural) or []
+        yield resource, service_name, groups
 
 
 def spans_from(payload, received_ns):
     rows = []
-    for resource_span in payload.get("resourceSpans", []):
-        resource = _attrs_to_object(resource_span.get("resource", {}).get("attributes", []))
-        service_name = str(resource.get("service.name", ""))
-        for group in _scope_groups(resource_span):
+    for resource, service_name, groups in _walk(payload, "Spans"):
+        for group in groups:
             scope = group.get("scope") or group.get("instrumentationLibrary") or {}
             scope_name = scope.get("name")
             scope_ver = scope.get("version")
@@ -137,10 +140,7 @@ def _span_row(span, resource, service_name, scope_name, scope_ver, received_ns):
 
 def metrics_from(payload):
     metrics = []
-    for resource_metrics in payload.get("resourceMetrics", []):
-        resource = _attrs_to_object(resource_metrics.get("resource", {}).get("attributes", []))
-        service_name = str(resource.get("service.name", ""))
-        groups = resource_metrics.get("scopeMetrics") or resource_metrics.get("instrumentationLibraryMetrics") or []
+    for _resource, service_name, groups in _walk(payload, "Metrics"):
         for group in groups:
             for metric in group.get("metrics", []):
                 parsed = _metric(metric, service_name)
@@ -184,10 +184,7 @@ def _metric(metric, service_name):
 
 def log_records_from(payload):
     records = []
-    for resource_logs in payload.get("resourceLogs", []):
-        resource = _attrs_to_object(resource_logs.get("resource", {}).get("attributes", []))
-        service_name = str(resource.get("service.name", ""))
-        groups = resource_logs.get("scopeLogs") or resource_logs.get("instrumentationLibraryLogs") or []
+    for resource, service_name, groups in _walk(payload, "Logs"):
         for group in groups:
             scope = group.get("scope") or group.get("instrumentationLibrary") or {}
             for record in group.get("logRecords", []):

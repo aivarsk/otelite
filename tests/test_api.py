@@ -1,8 +1,7 @@
-import time
 import unittest
 
-from test_http import HttpTestBase, wait_count
-from test_normalize import TRACE_ID, logs_payload, metrics_payload, traces_payload
+from fixtures import TRACE_ID, logs_payload, metrics_payload, traces_payload
+from test_http import HttpTestBase, wait_count, wait_file, wait_until
 
 # fixture timestamps are 2024-10-19T09:05:32Z
 FROM_MS = 1729296000000  # 2024-10-19 00:00:00 UTC
@@ -19,11 +18,7 @@ class TestViewerApi(HttpTestBase, unittest.TestCase):
         wait_count(self.cfg.db_path, "SELECT count(*) FROM spans", 1)
         wait_count(self.cfg.db_path, "SELECT count(*) FROM samples", 2)
         path = self.cfg.logs_dir / "2024-10-19" / "checkout.jsonl"
-        deadline = time.time() + 10
-        while time.time() < deadline:
-            if path.exists() and "checkout failed" in path.read_text():
-                break
-            time.sleep(0.05)
+        self.assertTrue(wait_file(path, "checkout failed"), "log file never appeared")
 
     def test_root_serves_html_page(self):
         status, content_type, body = self.get("/")
@@ -54,6 +49,9 @@ class TestViewerApi(HttpTestBase, unittest.TestCase):
         self.assertEqual(span["status_code"], 2)
         self.assertEqual(span["duration_ms"], 48)
         self.assertEqual(span["attrs"]["http.route"], "/checkout")
+        self.assertEqual(span["attrs"]["retries"], 3)
+        self.assertEqual(span["attrs"]["ok"], True)
+        self.assertEqual(span["attrs"]["tags"], ["a", 1])
         self.assertEqual(span["events"][0]["name"], "cart.loaded")
 
     def test_strace_trace_bad_id_404(self):
@@ -82,15 +80,13 @@ class TestViewerApi(HttpTestBase, unittest.TestCase):
         ]
         status, _ = self.post("/v1/metrics", {"resourceMetrics": [{"scopeMetrics": [{"metrics": metrics}]}]})
         self.assertEqual(status, 200)
-        deadline = time.time() + 10
-        total = 0
-        while time.time() < deadline:
+
+        def poll_total():
             _, _, data = self.get("/awk/metrics")
             total = sum(len(g["metrics"]) for g in data["groups"])
-            if total >= 100:
-                break
-            time.sleep(0.05)
-        self.assertGreaterEqual(total, 100)
+            return total >= 100 and total
+
+        self.assertGreaterEqual(wait_until(poll_total) or 0, 100)
 
     def _metric_id_by_name(self, name):
         _, _, metrics = self.get("/awk/metrics")
@@ -154,14 +150,13 @@ class TestViewerApi(HttpTestBase, unittest.TestCase):
         # sorted output must interleave by time, not group by service.
         self.post("/v1/logs", payload("zzz", 1729328732000000000))
         self.post("/v1/logs", payload("aaa", 1729328732100000000))
-        deadline = time.time() + 10
-        times = []
-        while time.time() < deadline:
+
+        def poll_times():
             _, _, data = self.get("/grep/logs", {"from": FROM_MS, "to": TO_MS})
             times = [entry["time_ms"] for entry in data["logs"]]
-            if len(times) >= 4:
-                break
-            time.sleep(0.05)
+            return len(times) >= 4 and times
+
+        times = wait_until(poll_times) or []
         self.assertGreaterEqual(len(times), 4)
         self.assertEqual(times, sorted(times))
 

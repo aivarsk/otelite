@@ -123,7 +123,7 @@ is a dev tool.
 
 ```bash
 make build    # dist/otelite-<version>.pyz
-make test     # 79 tests
+make test
 make lint     # ruff + mypy
 ./generator/run.sh            # demo data via the real OTEL SDK
 python3 generator/stress.py --signal traces --seconds 20

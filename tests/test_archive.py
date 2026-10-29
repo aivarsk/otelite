@@ -7,8 +7,8 @@ import unittest
 import zipfile
 from pathlib import Path
 
+from fixtures import logs_payload, traces_payload
 from test_http import HttpTestBase
-from test_normalize import logs_payload, traces_payload
 
 from otelite import archiveio, db
 from otelite.normalize import log_records_from, spans_from

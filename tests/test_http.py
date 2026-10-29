@@ -11,7 +11,7 @@ import time
 import unittest
 from pathlib import Path
 
-from test_normalize import TRACE_ID, logs_payload, metrics_payload, traces_payload
+from fixtures import TRACE_ID, logs_payload, metrics_payload, traces_payload
 
 from otelite.config import Config
 from otelite.server import serve
@@ -38,6 +38,28 @@ def wait_count(db_path, sql, expected, timeout=10.0):
             return count
         time.sleep(0.05)
     return count
+
+
+def wait_until(predicate, timeout=10.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        value = predicate()
+        if value:
+            return value
+        time.sleep(0.05)
+    return None
+
+
+def wait_file(path, needle, timeout=10.0):
+    # file content once the needle lands, empty string on timeout, so
+    # callers can assertIn either way
+    def poll():
+        if not path.exists():
+            return ""
+        content = path.read_text()
+        return content if needle in content else ""
+
+    return wait_until(poll, timeout) or ""
 
 
 class ServerThread:
@@ -132,11 +154,13 @@ class TestIngestHttp(HttpTestBase, unittest.TestCase):
         count = wait_count(self.cfg.db_path, "SELECT count(*) FROM spans", 1)
         self.assertEqual(count, 1)
         conn = sqlite3.connect(str(self.cfg.db_path))
-        row = conn.execute("SELECT hex(trace_id), name, service_name FROM spans").fetchone()
+        row = conn.execute("SELECT hex(trace_id), name, service_name, events, links FROM spans").fetchone()
         conn.close()
         self.assertEqual(row[0], TRACE_ID.upper())
         self.assertEqual(row[1], "POST /checkout")
         self.assertEqual(row[2], "checkout")
+        self.assertIn("cart.loaded", row[3])
+        self.assertIn(TRACE_ID, row[4])
 
     def test_metrics_200_then_rows(self):
         status, _ = self.post("/v1/metrics", metrics_payload())
@@ -187,7 +211,42 @@ class TestIngestHttp(HttpTestBase, unittest.TestCase):
             time.sleep(0.05)
         self.assertIn(TRACE_ID, content)
         self.assertIn("checkout failed for cart 42", content)
+        self.assertIn("recovered", content)
         self.assertIn('"resource"', content)
+
+    def test_span_with_bad_id_dropped(self):
+        payload = traces_payload()
+        payload["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["spanId"] = "not-hex"
+        status, _ = self.post("/v1/traces", payload)
+        self.assertEqual(status, 200)
+        # the writer flushes every few ms; a short beat proves nothing lands
+        time.sleep(0.3)
+        conn = sqlite3.connect(str(self.cfg.db_path))
+        count = conn.execute("SELECT count(*) FROM spans").fetchone()[0]
+        conn.close()
+        self.assertEqual(count, 0)
+
+    def test_legacy_instrumentation_library_key(self):
+        payload = traces_payload()
+        group = payload["resourceSpans"][0].pop("scopeSpans")
+        group[0]["instrumentationLibrary"] = group[0].pop("scope")
+        payload["resourceSpans"][0]["instrumentationLibrarySpans"] = group
+        status, _ = self.post("/v1/traces", payload)
+        self.assertEqual(status, 200)
+        self.assertEqual(wait_count(self.cfg.db_path, "SELECT count(*) FROM spans", 1), 1)
+        conn = sqlite3.connect(str(self.cfg.db_path))
+        row = conn.execute("SELECT scope_name FROM spans").fetchone()
+        conn.close()
+        self.assertEqual(row[0], "my.app")
+
+    def test_histogram_metric_skipped(self):
+        status, _ = self.post("/v1/metrics", metrics_payload())
+        self.assertEqual(status, 200)
+        # sum and gauge datapoints land; the histogram is dropped on purpose
+        self.assertEqual(wait_count(self.cfg.db_path, "SELECT count(*) FROM samples", 2), 2)
+        _, _, data = self.get("/awk/metrics")
+        names = [m["name"] for g in data["groups"] for m in g["metrics"]]
+        self.assertNotIn("latency.histogram", names)
 
     def test_gzip_body_accepted(self):
         raw = json.dumps(traces_payload()).encode()

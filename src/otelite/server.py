@@ -152,8 +152,6 @@ def make_routes(cfg, writer):
         path, params = _query(target)
         if method == "GET":
             return _get(path, params)
-        if path == "/healthz":
-            return _json(200, {"status": "ok"})
         if cfg.archive and method == "POST":
             return _json(403, {"message": "read-only archive mode, ingestion is disabled"})
         signal = SIGNALS.get(path)
