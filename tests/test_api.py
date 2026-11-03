@@ -6,6 +6,17 @@ from test_http import HttpTestBase, wait_count, wait_file, wait_until
 # fixture timestamps are 2024-10-19T09:05:32Z
 FROM_MS = 1729296000000  # 2024-10-19 00:00:00 UTC
 TO_MS = 1729382400000  # 2024-10-20 00:00:00 UTC
+SLOW_TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736"
+
+
+def slow_trace_payload():
+    payload = traces_payload()
+    span = payload["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
+    span["traceId"] = SLOW_TRACE_ID
+    span["spanId"] = "00f067aa0ba902b7"
+    span["status"] = {"code": "STATUS_CODE_OK"}
+    span["endTimeUnixNano"] = 1729328732551000000  # 500 ms
+    return payload
 
 
 class TestViewerApi(HttpTestBase, unittest.TestCase):
@@ -57,6 +68,25 @@ class TestViewerApi(HttpTestBase, unittest.TestCase):
     def test_strace_trace_bad_id_404(self):
         status, _, _ = self.get("/strace/trace", {"id": "not-hex"})
         self.assertEqual(status, 404)
+
+    def test_strace_traces_filters_and_sort(self):
+        status, _ = self.post("/v1/traces", slow_trace_payload())
+        self.assertEqual(status, 200)
+        wait_count(self.cfg.db_path, "SELECT count(*) FROM spans", 2)
+        # errors only: the OK trace drops out
+        _, _, data = self.get("/strace/traces", {"from": FROM_MS, "to": TO_MS, "errors": "1"})
+        self.assertEqual([t["trace_id"] for t in data["traces"]], [TRACE_ID])
+        # min duration: only the 500 ms trace clears a 100 ms floor
+        _, _, data = self.get("/strace/traces", {"from": FROM_MS, "to": TO_MS, "min_ms": "100"})
+        self.assertEqual([t["trace_id"] for t in data["traces"]], [SLOW_TRACE_ID])
+        # sort by duration puts the slowest first; default lists both
+        _, _, data = self.get("/strace/traces", {"from": FROM_MS, "to": TO_MS, "sort": "duration"})
+        self.assertEqual(data["traces"][0]["trace_id"], SLOW_TRACE_ID)
+        _, _, data = self.get("/strace/traces", {"from": FROM_MS, "to": TO_MS})
+        self.assertEqual(len(data["traces"]), 2)
+        # junk min_ms is a 400, not a crash
+        status, _, _ = self.get("/strace/traces", {"from": FROM_MS, "to": TO_MS, "min_ms": "abc"})
+        self.assertEqual(status, 400)
 
     def test_awk_metrics_grouped_by_unit_and_kind(self):
         status, _, data = self.get("/awk/metrics")
@@ -160,6 +190,31 @@ class TestViewerApi(HttpTestBase, unittest.TestCase):
         self.assertGreaterEqual(len(times), 4)
         self.assertEqual(times, sorted(times))
 
+    def test_grep_logs_reports_total_past_the_cap(self):
+        base = 1729328732051000000
+        records = [
+            {
+                "timeUnixNano": str(base + i * 1000),
+                "severityText": "INFO",
+                "body": {"stringValue": f"bulk line {i}"},
+            }
+            for i in range(1001)
+        ]
+        payload = {
+            "resourceLogs": [
+                {
+                    "resource": {"attributes": [{"key": "service.name", "value": {"stringValue": "bulk"}}]},
+                    "scopeLogs": [{"logRecords": records}],
+                }
+            ]
+        }
+        status, _ = self.post("/v1/logs", payload)
+        self.assertEqual(status, 200)
+        wait_file(self.cfg.logs_dir / "2024-10-19" / "bulk.jsonl", "bulk line 1000")
+        _, _, data = self.get("/grep/logs", {"from": FROM_MS, "to": TO_MS, "service": "bulk"})
+        self.assertEqual(len(data["logs"]), 1000)
+        self.assertEqual(data["total"], 1001)
+
     def test_grep_logs_empty_range(self):
         status, _, data = self.get("/grep/logs", {"from": 0, "to": 1})
         self.assertEqual(status, 200)
@@ -176,6 +231,7 @@ class TestViewerApi(HttpTestBase, unittest.TestCase):
     def test_perl_stats_per_service(self):
         status, _, data = self.get("/perl/stats", {"from": FROM_MS, "to": TO_MS})
         self.assertEqual(status, 200)
+        self.assertGreater(data["size_bytes"], 0)
         services = {s["service"]: s for s in data["services"]}
         self.assertIn("checkout", services)
         checkout = services["checkout"]

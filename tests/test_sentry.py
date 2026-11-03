@@ -133,6 +133,35 @@ class TestSentryIngest(HttpTestBase, unittest.TestCase):
         self.assertEqual(sum(kinds["ValueError"]), 1)
         self.assertEqual(sum(kinds["KeyError"]), 1)
 
+    def test_group_occurrences_listed_latest_first(self):
+        # three events with the same exception shape land in one group; the
+        # occurrences endpoint pages the group's history newest first
+        for i in range(3):
+            self.post(
+                "/api/1/store/",
+                sentry_event(event_id=f"aaaa1111aaaa1111aaaa1111aaaa11{i:02d}"),
+                headers=SENTRY_AUTH,
+            )
+
+        def poll_groups():
+            _, _, data = self.get("/grep/errors", hour_range())
+            return data["total"] == 3 and data
+
+        data = wait_until(poll_groups) or {}
+        self.assertEqual(data["total"], 3)
+        self.assertEqual(len(data["errors"]), 1)
+        group = data["errors"][0]["group"]
+        _, _, occ = self.get("/grep/errors/occurrences", {**hour_range(), "group": group})
+        self.assertEqual(occ["total"], 3)
+        self.assertEqual(len(occ["occurrences"]), 3)
+        ids = [o["event_id"] for o in occ["occurrences"]]
+        self.assertEqual(len(set(ids)), 3)
+        times = [o["time_ms"] for o in occ["occurrences"]]
+        self.assertEqual(times, sorted(times, reverse=True))
+        # missing group is a 400
+        status, _, _ = self.get("/grep/errors/occurrences", hour_range())
+        self.assertEqual(status, 400)
+
     def test_stats_count_sentry_errors(self):
         self.post("/api/1/store/", sentry_event(), headers=SENTRY_AUTH)
 

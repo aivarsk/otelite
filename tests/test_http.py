@@ -276,6 +276,22 @@ class TestIngestHttp(HttpTestBase, unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(data["status"], "ok")
 
+    def test_grpc_preface_gets_a_pointed_answer(self):
+        # an OTLP/gRPC SDK opens with the HTTP/2 client preface; the answer
+        # must say what to fix, not just "invalid json"
+        sock = socket.create_connection(("127.0.0.1", self.cfg.port), timeout=5)
+        sock.sendall(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+        raw = b""
+        while b"\r\n\r\n" not in raw:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            raw += chunk
+        sock.close()
+        status_line = raw.split(b"\r\n", 1)[0].decode()
+        self.assertIn("505", status_line)
+        self.assertIn(b"OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf", raw)
+
     def test_keep_alive_pipelining(self):
         conn = http.client.HTTPConnection("127.0.0.1", self.cfg.port, timeout=5)
         for _ in range(3):

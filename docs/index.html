@@ -135,10 +135,27 @@ EOF</pre>
   </section>
 
   <section class="mb-5">
+    <h2>Point an SDK at it</h2>
+    <p>Any SDK that speaks OTLP/HTTP works. SDKs that default to gRPC need the
+    protocol switch once, per shell or per run:</p>
+    <div class="install p-3 mt-2">
+      <pre class="mono">export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf   # SDKs that default to gRPC (Python, Java)</pre>
+    </div>
+    <ul class="mt-2">
+      <li>Python: <span class="mono">opentelemetry-instrument python app.py</span></li>
+      <li>Node: <span class="mono">node --require @opentelemetry/auto-instrumentations-node/register app.js</span> (OTLP/HTTP by default)</li>
+      <li>Java: <span class="mono">java -javaagent:opentelemetry-javaagent.jar ...</span> with the two exports above</li>
+      <li>Collector: <span class="mono">exporters.otlphttp.endpoint = http://localhost:4318</span></li>
+    </ul>
+    <p>A gRPC client that hits the HTTP port anyway gets a 505 that names the fix.</p>
+  </section>
+
+  <section class="mb-5">
     <h2>Protocol notes</h2>
     <ul>
       <li>OTLP/HTTP with JSON bodies on port 4318. gzip accepted. 200 {} means accepted; a full queue answers 429 with Retry-After and the SDK retries.</li>
-      <li>gRPC on 4317 is not supported. Point SDKs and the collector at <span class="mono">http://localhost:4318</span>.</li>
+      <li>gRPC on 4317 is not supported. Point SDKs and the collector at <span class="mono">http://localhost:4318</span>; a gRPC client that shows up there anyway gets a 505 naming the fix.</li>
       <li>Binary protobuf is later. JSON is the protocol here.</li>
       <li>Sentry error events ride the same port: store and envelope endpoints under <span class="mono">/api/&lt;project&gt;/</span>, any project id, any key, nothing verified. Errors land as JSONL files next to the logs and group by exception kind on the page.</li>
     </ul>

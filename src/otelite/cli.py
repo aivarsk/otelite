@@ -4,12 +4,41 @@ import logging
 import os
 import shutil
 import threading
+from contextlib import closing
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from . import archiveio, demo
+from . import archiveio, db, demo
 from .config import APP_VERSION, Config
 from .server import serve
 from .writer import Writer
+
+
+def _prune(cfg, days):
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff_day = cutoff.date().isoformat()
+    day_dirs = 0
+    for base in (cfg.logs_dir, cfg.errors_dir):
+        if not base.is_dir():
+            continue
+        for child in base.iterdir():
+            # day directories are named YYYY-MM-DD, so a string compare is a date compare
+            if len(child.name) == 10 and child.name < cutoff_day:
+                shutil.rmtree(child, ignore_errors=True)
+                day_dirs += 1
+    removed_spans = 0
+    removed_samples = 0
+    if cfg.db_path.exists():
+        with closing(db.connect(cfg.db_path)) as conn:
+            removed_samples = conn.execute(
+                "DELETE FROM samples WHERE ts < ?", (int(cutoff.timestamp() * 1e3),)
+            ).rowcount
+            removed_spans = conn.execute(
+                "DELETE FROM spans WHERE start_ns < ?", (int(cutoff.timestamp() * 1e9),)
+            ).rowcount
+            conn.commit()
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    print(f"pruned {day_dirs} day directories, {removed_spans} spans, {removed_samples} samples older than {days} days")
 
 
 def main(argv=None):
@@ -28,6 +57,13 @@ def main(argv=None):
         type=Path,
         default=None,
         help="serve a zipped or tarred otelite data directory read-only; ingestion is disabled",
+    )
+    parser.add_argument(
+        "--prune",
+        type=int,
+        metavar="DAYS",
+        default=None,
+        help="delete logs, errors, spans, and samples older than DAYS, then exit",
     )
     args = parser.parse_args(argv)
 
@@ -61,6 +97,11 @@ def main(argv=None):
         cfg.root = extracted
         cfg.archive = str(args.archive)
         print(f"serving {args.archive} read-only from {extracted}; ingestion is disabled")
+    if args.prune is not None:
+        if args.archive:
+            parser.error("--prune cannot be combined with --archive")
+        _prune(cfg, args.prune)
+        return 0
     cfg.root.mkdir(parents=True, exist_ok=True)
     cfg.logs_dir.mkdir(parents=True, exist_ok=True)
     cfg.errors_dir.mkdir(parents=True, exist_ok=True)

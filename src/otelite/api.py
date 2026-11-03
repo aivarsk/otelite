@@ -1,5 +1,6 @@
 import collections
 import json
+import os
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -20,7 +21,7 @@ def _connect(cfg):
     return db.connect(cfg.db_path)
 
 
-def traces(cfg, from_ms, to_ms, service=None):
+def traces(cfg, from_ms, to_ms, service=None, errors_only=False, sort="start", min_ms=0):
     sql = """
     SELECT trace_id,
            min(start_ns) AS start_ns,
@@ -36,7 +37,17 @@ def traces(cfg, from_ms, to_ms, service=None):
     if service:
         sql += " AND service_name = ?"
         params.append(service)
-    sql += " GROUP BY trace_id ORDER BY start_ns DESC LIMIT ?"
+    sql += " GROUP BY trace_id"
+    conditions = []
+    if errors_only:
+        conditions.append("sum(status_code = 2) > 0")
+    if min_ms > 0:
+        conditions.append("(max(end_ns) - min(start_ns)) >= ?")
+        params.append(min_ms * 1_000_000)
+    if conditions:
+        sql += " HAVING " + " AND ".join(conditions)
+    order = "duration_ns DESC" if sort == "duration" else "start_ns DESC"
+    sql += f" ORDER BY {order} LIMIT ?"
     params.append(MAX_TRACES)
     with closing(_connect(cfg)) as conn:
         rows = conn.execute(sql, params).fetchall()
@@ -185,6 +196,7 @@ def logs(cfg, from_ms, to_ms, service=None, q=None):
     # global timeline: interleave services by record time, cap keeps the earliest lines
     matches = sorted(_scan_day_records(cfg.logs_dir, from_ms, to_ms, service, q), key=lambda item: item[0])
     return {
+        "total": len(matches),
         "logs": [
             {
                 "time_ms": ts_ms,
@@ -195,7 +207,7 @@ def logs(cfg, from_ms, to_ms, service=None, q=None):
                 "span_id": record.get("span_id", ""),
             }
             for ts_ms, record in matches[:MAX_LOG_LINES]
-        ]
+        ],
     }
 
 
@@ -262,6 +274,7 @@ def errors(cfg, from_ms, to_ms, service=None, q=None):
             group["event"] = record
     ordered = sorted(groups.values(), key=lambda g: (-g["count"], g["kind"], g["message"]))
     return {
+        "total": len(matches),
         "errors": [
             {
                 "group": g["group"],
@@ -278,7 +291,27 @@ def errors(cfg, from_ms, to_ms, service=None, q=None):
                 "event": g["event"].get("event", {}),
             }
             for g in ordered
-        ]
+        ],
+    }
+
+
+def error_occurrences(cfg, group, from_ms, to_ms, limit=20):
+    # the drill-down picker: latest N events of one group, newest first
+    matches = [
+        record for _ts, record in _scan_day_records(cfg.errors_dir, from_ms, to_ms) if record.get("group") == group
+    ]
+    matches.sort(key=lambda record: record.get("time_unix_nano", 0), reverse=True)
+    return {
+        "total": len(matches),
+        "occurrences": [
+            {
+                "time_ms": record.get("time_unix_nano", 0) // 1_000_000,
+                "event_id": record.get("event_id", ""),
+                "trace_id": record.get("trace_id", ""),
+                "event": record.get("event", {}),
+            }
+            for record in matches[:limit]
+        ],
     }
 
 
@@ -300,6 +333,23 @@ def errors_series(cfg, from_ms, to_ms, service=None, q=None, buckets=120):
         "kinds",
         buckets,
     )
+
+
+def _data_size(cfg):
+    total = 0
+    for suffix in ("", "-wal", "-shm"):
+        path = cfg.db_path.parent / (cfg.db_path.name + suffix)
+        if path.exists():
+            total += path.stat().st_size
+    for root in (cfg.logs_dir, cfg.errors_dir):
+        if root.is_dir():
+            for dirpath, _dirnames, filenames in os.walk(root):
+                for name in filenames:
+                    try:
+                        total += os.path.getsize(os.path.join(dirpath, name))
+                    except OSError:
+                        pass
+    return total
 
 
 def stats(cfg, from_ms, to_ms):
@@ -326,6 +376,7 @@ def stats(cfg, from_ms, to_ms):
     for name, count in _count_day_records(cfg.errors_dir, from_ms, to_ms).items():
         services.setdefault(name, {})["sentry"] = count
     return {
+        "size_bytes": _data_size(cfg),
         "services": [
             {
                 "service": name or "unknown",
@@ -336,5 +387,5 @@ def stats(cfg, from_ms, to_ms):
                 "sentry": values.get("sentry", 0),
             }
             for name, values in sorted(services.items())
-        ]
+        ],
     }

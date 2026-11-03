@@ -1,12 +1,15 @@
 import asyncio
 import gzip
 import json
+import logging
 import pkgutil
 import re
 import time
 import urllib.parse
 
 from . import api, normalize, sentryio
+
+log = logging.getLogger("otelite")
 
 MAX_HEADER_BYTES = 64 * 1024
 
@@ -21,7 +24,15 @@ REASONS = {
     429: "Too Many Requests",
     500: "Internal Server Error",
     501: "Not Implemented",
+    505: "HTTP Version Not Supported",
 }
+
+# an OTLP/gRPC client opens with the HTTP/2 connection preface, which parses
+# as a request line here; answer with the fix instead of a bare 400
+GRPC_HINT = (
+    "gRPC client detected: this port speaks OTLP/HTTP with JSON payloads only. "
+    "Point the SDK at http://<host>:4318 and set OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf."
+)
 
 SIGNALS = {
     "/v1/traces": ("spans", lambda payload, received_ns: normalize.spans_from(payload, received_ns)),
@@ -52,6 +63,9 @@ async def _read_request(reader, writer, cfg):
         method, target, _version = line.decode("latin-1").strip().split()
     except ValueError:
         raise HttpError(400, "bad request line")
+    if method == "PRI" or _version.startswith("HTTP/2"):
+        log.warning("gRPC client hit port %s; OTLP/gRPC is not supported", cfg.port)
+        raise HttpError(505, GRPC_HINT)
     headers = {}
     total = 0
     while True:
@@ -207,7 +221,12 @@ def make_routes(cfg, writer):
         from_ms, to_ms = _range(params)
         service = params.get("service") or None
         if path == "/strace/traces":
-            return _json(200, api.traces(cfg, from_ms, to_ms, service))
+            try:
+                min_ms = max(int(params.get("min_ms") or 0), 0)
+            except ValueError:
+                raise HttpError(400, "min_ms must be a number")
+            sort = "duration" if params.get("sort") == "duration" else "start"
+            return _json(200, api.traces(cfg, from_ms, to_ms, service, params.get("errors") == "1", sort, min_ms))
         if path == "/strace/trace":
             trace_id = params.get("id", "")
             result = api.trace(cfg, trace_id)
@@ -230,6 +249,11 @@ def make_routes(cfg, writer):
             return _json(200, api.errors(cfg, from_ms, to_ms, service, params.get("q") or None))
         if path == "/grep/errors/series":
             return _json(200, api.errors_series(cfg, from_ms, to_ms, service, params.get("q") or None))
+        if path == "/grep/errors/occurrences":
+            group = params.get("group", "")
+            if not group:
+                raise HttpError(400, "group is required")
+            return _json(200, api.error_occurrences(cfg, group, from_ms, to_ms))
         if path == "/perl/stats":
             return _json(200, api.stats(cfg, from_ms, to_ms))
         if path in SIGNALS or SENTRY_PATH.match(path):

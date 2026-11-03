@@ -15,7 +15,10 @@ curl -fsSL https://otelite.io/install.sh | bash
 ```
 
 Point your OTEL SDK at `http://localhost:4318` and open the same address
-in a browser. That is the whole setup.
+in a browser. That is the whole setup. SDKs that default to gRPC (Python,
+Java) need the protocol switch once: `export
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`. A gRPC client that hits the
+HTTP port gets a 505 naming that fix.
 
 Rather not pipe install.sh? Download the latest `otelite-*.pyz` from the
 releases page and run `python3 otelite-*.pyz`. Empty page on first run?
@@ -86,16 +89,22 @@ otelite --archive run.tgz    # read-only viewer on http://localhost:4318
 The page, the read APIs, and `grep` work as usual; every OTLP and Sentry
 ingestion call is refused with 403.
 
+Long-running dev instances accumulate days of data. The page shows the
+on-disk size under Services; `otelite --prune 7` deletes anything older
+than the given days (log and error day directories, spans, samples) and
+exits.
+
 Browser SDKs: responses carry no CORS headers yet, so a browser SDK needs
 same-origin serving or a local proxy. Server-side SDKs (Python, Node, Go,
 Rust) just work.
 
 ## Small on purpose
 
-No alerts, no dashboards-as-product, no retention machinery, no high
+No alerts, no dashboards-as-product, no automatic retention, no high
 availability. Eventual consistency, garage grade. No fsync: if it dies, it
 dies, and you start a new instance in seconds. When an instance grows too
-big, seal it, keep it as history, spawn a fresh one.
+big, seal it, keep it as history, spawn a fresh one, or sweep it with
+`--prune`.
 
 ## File formats (the API)
 
