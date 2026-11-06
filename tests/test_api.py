@@ -240,6 +240,26 @@ class TestViewerApi(HttpTestBase, unittest.TestCase):
         self.assertEqual(checkout["samples"], 2)
         self.assertEqual(checkout["logs"], 2)
 
+    def test_ql_endpoints(self):
+        # the three ql languages are served in-process, same data dir
+        status, _, data = self.get(
+            "/ql/traceql", {"q": '{ name = "POST /checkout" }', "from": FROM_MS, "to": TO_MS}
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual([t["trace_id"] for t in data["traces"]], [TRACE_ID])
+        status, _, data = self.get(
+            "/ql/logql", {"q": '{service="checkout"} |= "failed"', "from": FROM_MS, "to": TO_MS}
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(len(data["logs"]), 1)
+        status, _, data = self.get("/ql/promql", {"q": "sum(queue.depth)", "from": FROM_MS, "to": TO_MS})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["rows"][0]["value"], 3.5)
+        # a broken query is a 400 with the language name in the message
+        status, _, body = self.get("/ql/traceql", {"q": "{ name = }", "from": FROM_MS, "to": TO_MS})
+        self.assertEqual(status, 400)
+        self.assertIn("traceql:", body["message"])
+
     def test_unknown_api_404(self):
         status, _, _ = self.get("/netstat/open", {"from": FROM_MS, "to": TO_MS})
         self.assertEqual(status, 404)

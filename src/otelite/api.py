@@ -21,7 +21,7 @@ def _connect(cfg):
     return db.connect(cfg.db_path)
 
 
-def traces(cfg, from_ms, to_ms, service=None, errors_only=False, sort="start", min_ms=0):
+def traces(cfg, from_ms, to_ms, service=None, errors_only=False, sort="start", min_ms=0, trace_ids=None):
     sql = """
     SELECT trace_id,
            min(start_ns) AS start_ns,
@@ -37,6 +37,12 @@ def traces(cfg, from_ms, to_ms, service=None, errors_only=False, sort="start", m
     if service:
         sql += " AND service_name = ?"
         params.append(service)
+    if trace_ids is not None:
+        # ql prefilter: keep only traces that matched a TraceQL query
+        if not trace_ids:
+            return {"traces": []}
+        sql += f" AND trace_id IN ({','.join('?' for _ in trace_ids)})"
+        params.extend(bytes.fromhex(trace_id) for trace_id in trace_ids)
     sql += " GROUP BY trace_id"
     conditions = []
     if errors_only:

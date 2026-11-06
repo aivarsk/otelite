@@ -87,7 +87,7 @@ footer { padding:8px 16px; color:var(--gray); font-size:12px; display:flex; just
 </header>
 <main>
   <section>
-    <h2>Traces <span class="path">GET /strace/traces</span></h2>
+    <h2>Traces <span class="path">GET /strace/traces, /ql/traceql</span></h2>
     <div class="filters">
       <label><input type="checkbox" id="trace-errors"> errors only</label>
       <select id="trace-sort">
@@ -95,26 +95,33 @@ footer { padding:8px 16px; color:var(--gray); font-size:12px; display:flex; just
         <option value="duration">slowest</option>
       </select>
       <input id="trace-min" placeholder="min ms" size="5" title="minimum trace duration in milliseconds">
+      <input id="trace-ql" placeholder='traceql: { status = error }' title="TraceQL subset query; replaces the plain filters when filled" size="28">
     </div>
     <div id="trace-scatter"></div>
     <div id="trace-list">loading...</div>
   </section>
   <section>
-    <h2>Metrics <span class="path">GET /awk/metrics, /awk/series</span></h2>
+    <h2>Metrics <span class="path">GET /awk/metrics, /awk/series, /ql/promql</span></h2>
     <div class="cols">
+      <div class="filters">
+        <input id="prom-ql" placeholder='promql: sum by (service) (demo.requests)' title="PromQL subset; instant vector results in the table below" style="min-width:300px">
+        <button id="prom-apply">run</button>
+      </div>
+      <div id="prom-result"></div>
       <input id="metric-filter" placeholder="filter metrics..." style="margin-bottom:6px">
       <div class="metric-list" id="metric-list">loading...</div>
       <div class="charts" id="charts">pick metrics on the left</div>
     </div>
   </section>
   <section id="logs">
-    <h2>Logs <span class="path">GET /grep/logs, /grep/logs/series</span></h2>
+    <h2>Logs <span class="path">GET /grep/logs, /grep/logs/series, /ql/logql</span></h2>
     <div id="log-chart"></div>
     <div id="log-sev" class="legend" style="margin:6px 0"></div>
     <div class="filters">
       <input id="log-service" placeholder="service">
       <input id="log-q" placeholder="grep...">
       <button id="log-apply">grep</button>
+      <input id="log-ql" placeholder='logql: {service="checkout"} |= "failed"' title="LogQL subset query; replaces service/grep when filled" size="30">
     </div>
     <div id="log-lines">loading...</div>
   </section>
@@ -149,6 +156,18 @@ const state = { fromMs: Date.now() - 3600e3, toMs: Date.now(), followNow: true, 
     state.fromMs = fromParam;
     state.toMs = toParam;
   }
+  // filters and the open trace ride along so a copied URL reproduces the view
+  if (params.get("logService")) $("log-service").value = params.get("logService");
+  if (params.get("logQ")) $("log-q").value = params.get("logQ");
+  if (params.get("errService")) $("err-service").value = params.get("errService");
+  if (params.get("errQ")) $("err-q").value = params.get("errQ");
+  if (params.get("traceErrors") === "1") $("trace-errors").checked = true;
+  if (params.get("traceSort") === "duration") $("trace-sort").value = "duration";
+  if (params.get("traceMin")) $("trace-min").value = params.get("traceMin");
+  if (params.get("trace")) state.expandedTrace = params.get("trace");
+  if (params.get("traceQl")) $("trace-ql").value = params.get("traceQl");
+  if (params.get("logQl")) $("log-ql").value = params.get("logQl");
+  if (params.get("promQl")) $("prom-ql").value = params.get("promQl");
 }
 const COLORS = ["#2E6BE6", "#F2A33C", "#17242B", "#8A94A0", "#c0392b", "#27ae60"];
 const SEV_ORDER = ["FATAL", "ERROR", "WARN", "INFO", "DEBUG", "TRACE", "UNSPECIFIED"];
@@ -181,7 +200,12 @@ function parseDate(s) {
 async function getJson(path, params) {
   const qs = new URLSearchParams(params).toString();
   const res = await fetch(path + (qs ? "?" + qs : ""));
-  if (!res.ok) throw new Error(path + " -> " + res.status);
+  if (!res.ok) {
+    const text = await res.text();
+    let detail = text;
+    try { detail = JSON.parse(text).message || text; } catch (e) { /* not json */ }
+    throw new Error(path + " -> " + res.status + ": " + detail.slice(0, 200));
+  }
   return res.json();
 }
 
@@ -217,6 +241,17 @@ function syncUrl() {
   const params = new URLSearchParams();
   params.set("from", String(Math.round(state.fromMs)));
   params.set("to", String(Math.round(state.toMs)));
+  const logSvc = $("log-service").value.trim(); if (logSvc) params.set("logService", logSvc);
+  const logQ = $("log-q").value.trim(); if (logQ) params.set("logQ", logQ);
+  const errSvc = $("err-service").value.trim(); if (errSvc) params.set("errService", errSvc);
+  const errQ = $("err-q").value.trim(); if (errQ) params.set("errQ", errQ);
+  if ($("trace-errors").checked) params.set("traceErrors", "1");
+  if ($("trace-sort").value !== "start") params.set("traceSort", $("trace-sort").value);
+  const traceMin = $("trace-min").value.trim(); if (traceMin) params.set("traceMin", traceMin);
+  if (state.expandedTrace) params.set("trace", state.expandedTrace);
+  const traceQl = $("trace-ql").value.trim(); if (traceQl) params.set("traceQl", traceQl);
+  const logQl = $("log-ql").value.trim(); if (logQl) params.set("logQl", logQl);
+  const promQl = $("prom-ql").value.trim(); if (promQl) params.set("promQl", promQl);
   history.replaceState(null, "", "?" + params.toString());
 }
 
@@ -277,12 +312,27 @@ $("live-toggle").onclick = () => {
 
 async function loadTraces() {
   try {
-    const params = { from: state.fromMs, to: state.toMs };
-    if ($("trace-errors").checked) params.errors = "1";
-    if ($("trace-sort").value !== "start") params.sort = $("trace-sort").value;
-    const minMs = parseInt($("trace-min").value, 10);
-    if (minMs > 0) params.min_ms = minMs;
-    const data = await getJson("/strace/traces", params);
+    let data;
+    const ql = $("trace-ql").value.trim();
+    if (ql) {
+      data = await getJson("/ql/traceql", { q: ql, from: state.fromMs, to: state.toMs });
+      if (data.rows) {
+        // aggregate pipes answer with rows (count/avg tables), not spans
+        $("trace-list").innerHTML = data.rows.length
+          ? `<table><tbody>` + data.rows.map(row =>
+              `<tr>${Object.entries(row).map(([k, v]) => `<td class="dim">${esc(k)}</td><td>${esc(String(v))}</td>`).join("")}</tr>`).join("") +
+            `</tbody></table>`
+          : "no results";
+        return;
+      }
+    } else {
+      const params = { from: state.fromMs, to: state.toMs };
+      if ($("trace-errors").checked) params.errors = "1";
+      if ($("trace-sort").value !== "start") params.sort = $("trace-sort").value;
+      const minMs = parseInt($("trace-min").value, 10);
+      if (minMs > 0) params.min_ms = minMs;
+      data = await getJson("/strace/traces", params);
+    }
     const rows = data.traces.map(t =>
       `<tr class="clickable" data-id="${t.trace_id}">
         <td>${fmtDay(t.start_ms)}</td><td>${esc(t.root)}</td><td>${esc(t.service)}</td>
@@ -311,7 +361,7 @@ async function loadTraces() {
 
 function expandTraceRow(tr) {
   const next = tr.nextElementSibling;
-  if (next && next.classList.contains("trace-detail")) { next.remove(); state.expandedTrace = null; return; }
+  if (next && next.classList.contains("trace-detail")) { next.remove(); state.expandedTrace = null; syncUrl(); return; }
   openTrace(tr);
 }
 
@@ -322,6 +372,7 @@ function openTrace(tr) {
   row.innerHTML = '<td colspan="8"><div class="inline-trace"></div></td>';
   tr.after(row);
   state.expandedTrace = tr.dataset.id;
+  syncUrl();
   showTrace(tr.dataset.id, row.querySelector(".inline-trace"));
 }
 
@@ -586,7 +637,7 @@ async function loadLogsChart() {
   } catch (e) { host.textContent = e.message; }
 }
 
-function reloadLogs() { loadLogs(); loadLogsChart(); }
+function reloadLogs() { syncUrl(); loadLogs(); loadLogsChart(); }
 
 // errors get the same timeline chart as logs, one line per exception kind;
 // the kind legend chips hide both the line and the matching group rows
@@ -633,17 +684,49 @@ async function loadErrorsChart() {
     });
   } catch (e) { host.textContent = e.message; }
 }
-$("trace-errors").onchange = loadTraces;
-$("trace-sort").onchange = loadTraces;
-$("trace-min").addEventListener("change", loadTraces);
-$("trace-min").addEventListener("keydown", e => { if (e.key === "Enter") loadTraces(); });
+// the promql box answers an instant vector rendered as a small table;
+// it is a sibling of the picker/charts, not a chart source
+async function runPromQl() {
+  const query = $("prom-ql").value.trim();
+  const host = $("prom-result");
+  if (!query) { host.innerHTML = ""; return; }
+  host.textContent = "loading...";
+  try {
+    const data = await getJson("/ql/promql", { q: query, from: state.fromMs, to: state.toMs });
+    host.innerHTML = data.rows.length
+      ? `<table><thead><tr><th>metric</th><th>labels</th><th>value</th></tr></thead><tbody>` +
+        data.rows.map(row =>
+          `<tr><td class="mono">${esc(row.metric || "-")}</td>` +
+          `<td class="dim mono">${esc(attrsText(row.labels))}</td><td>${esc(String(row.value))}</td></tr>`).join("") +
+        `</tbody></table>`
+      : "no results";
+  } catch (e) { host.textContent = e.message; }
+}
+
+$("trace-errors").onchange = () => { syncUrl(); loadTraces(); };
+$("trace-sort").onchange = () => { syncUrl(); loadTraces(); };
+$("trace-min").addEventListener("change", () => { syncUrl(); loadTraces(); });
+$("trace-min").addEventListener("keydown", e => { if (e.key === "Enter") { syncUrl(); loadTraces(); } });
+$("trace-ql").addEventListener("change", () => { syncUrl(); loadTraces(); });
+$("trace-ql").addEventListener("keydown", e => { if (e.key === "Enter") { syncUrl(); loadTraces(); } });
+$("log-ql").addEventListener("change", () => { syncUrl(); loadLogs(); });
+$("log-ql").addEventListener("keydown", e => { if (e.key === "Enter") { syncUrl(); loadLogs(); } });
+$("prom-apply").onclick = () => { syncUrl(); runPromQl(); };
+$("prom-ql").addEventListener("keydown", e => { if (e.key === "Enter") { syncUrl(); runPromQl(); } });
 $("log-apply").onclick = reloadLogs;
 $("log-q").addEventListener("keydown", e => { if (e.key === "Enter") reloadLogs(); });
 async function loadLogs() {
   try {
-    const data = await getJson("/grep/logs", logFilterParams());
-    state.logData = data.logs;
-    state.logTotal = data.total || data.logs.length;
+    const ql = $("log-ql").value.trim();
+    if (ql) {
+      const data = await getJson("/ql/logql", { q: ql, from: state.fromMs, to: state.toMs });
+      state.logData = data.logs;
+      state.logTotal = data.logs.length;
+    } else {
+      const data = await getJson("/grep/logs", logFilterParams());
+      state.logData = data.logs;
+      state.logTotal = data.total || data.logs.length;
+    }
     renderLogLines();
   } catch (e) { $("log-lines").textContent = e.message; }
 }
@@ -691,7 +774,7 @@ function errFilterParams() {
   return params;
 }
 
-function reloadErrors() { loadErrors(); loadErrorsChart(); }
+function reloadErrors() { syncUrl(); loadErrors(); loadErrorsChart(); }
 $("err-apply").onclick = reloadErrors;
 $("err-q").addEventListener("keydown", e => { if (e.key === "Enter") reloadErrors(); });
 async function loadErrors() {
@@ -821,6 +904,7 @@ window.addEventListener("resize", () => {
 });
 
 refreshAll();
+runPromQl();
 </script>
 </body>
 </html>

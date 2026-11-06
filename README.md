@@ -38,6 +38,7 @@ docker build -t otelite . && docker run -p 4318:4318 otelite
 - traces and metrics in one SQLite file, logs and Sentry errors as JSONL files you grep; the files are the API
 - one page for everything: trace list with waterfall, metric picker with charts, raw logs, Sentry error groups with the trace join, one shared time range you can brush on any chart
 - read APIs named for the garage: `/strace` for traces, `/awk` for metrics, `/grep` for logs and errors, `/perl` for the per-service report
+- query boxes on the page (and `python3 -m otelite.ql` on the CLI): TraceQL over traces, LogQL over the log files, PromQL over metrics; subsets of the real languages, grep and SQL still work everywhere
 - zero runtime dependencies, standard library only, ships as a single zipapp
 - measured on a laptop: 3,500+ requests per second, 20,000+ records, one process
 - `otelite --demo` fills a fresh instance with sample telemetry so the page is never empty on first run

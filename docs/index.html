@@ -89,7 +89,7 @@
     <ol>
       <li>Point your OTEL SDK or collector at OTELite, OTLP/HTTP on port 4318.</li>
       <li>Traces and metrics land in one SQLite file you SELECT from. Logs land as JSONL files you grep. No new query languages: SQL and grep are the query languages.</li>
-      <li>Open the single page at <a href="http://localhost:4318/" class="ote mono text-decoration-none">http://localhost:4318/</a>, pick a time range, and see traces, metrics, and logs together. Filter logs by service, severity, or a grep string; click any line to jump to its trace; pick metrics and they chart on a shared range.</li>
+      <li>Open the single page at <a href="http://localhost:4318/" class="ote mono text-decoration-none">http://localhost:4318/</a>, pick a time range, and see traces, metrics, and logs together. Filter logs by service, severity, or a grep string; click any line to jump to its trace; pick metrics and they chart on a shared range. Each panel also has a query box when grep is not enough: <span class="mono">traceql</span> on traces, <span class="mono">logql</span> on logs, <span class="mono">promql</span> on metrics, subsets of the languages Grafana users know.</li>
     </ol>
     <p>The files are the API. Your data stays in a directory you own.</p>
   </section>

@@ -8,6 +8,9 @@ import time
 import urllib.parse
 
 from . import api, normalize, sentryio
+from .ql import logql as ql_log
+from .ql import promql as ql_prom
+from .ql import traceql as ql_trace
 
 log = logging.getLogger("otelite")
 
@@ -235,6 +238,38 @@ def make_routes(cfg, writer):
             return _json(200, result)
         if path == "/awk/metrics":
             return _json(200, api.metrics(cfg))
+        if path == "/ql/traceql":
+            query = params.get("q", "").strip()
+            if not query:
+                raise HttpError(400, "q is required")
+            try:
+                matched = ql_trace.execute(cfg, query, from_ms, to_ms, limit=5000)
+            except Exception as exc:
+                raise HttpError(400, f"traceql: {exc}")
+            if matched and "trace_id" not in matched[0]:
+                # aggregate pipes answer with rows, not spans; the page
+                # renders them as a plain table
+                return _json(200, {"rows": matched})
+            trace_ids = sorted({row["trace_id"] for row in matched})[:500]
+            return _json(200, api.traces(cfg, from_ms, to_ms, trace_ids=trace_ids))
+        if path == "/ql/logql":
+            query = params.get("q", "").strip()
+            if not query:
+                raise HttpError(400, "q is required")
+            try:
+                rows = ql_log.execute(cfg, query, from_ms, to_ms, limit=1000)
+            except Exception as exc:
+                raise HttpError(400, f"logql: {exc}")
+            return _json(200, {"logs": rows})
+        if path == "/ql/promql":
+            query = params.get("q", "").strip()
+            if not query:
+                raise HttpError(400, "q is required")
+            try:
+                rows = ql_prom.execute(cfg, query, from_ms, to_ms)
+            except Exception as exc:
+                raise HttpError(400, f"promql: {exc}")
+            return _json(200, {"rows": [{"metric": row["metric"], "labels": row["labels"], "value": row["value"]} for row in rows]})
         if path == "/awk/series":
             try:
                 ids = [int(part) for part in params.get("id", "").split(",") if part.strip()]

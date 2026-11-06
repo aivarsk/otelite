@@ -10,7 +10,7 @@ lint:
 	ruff format src/otelite/*.py tests/*.py
 	ruff check src/otelite tests
 	-mypy src/otelite
-	wc -l src/otelite/*.py | sort -n
+	wc -l src/otelite/*.py src/otelite/ql/*py | sort -n
 
 test:
 	PYTHONPATH=src python3 -m unittest discover -v -s tests -p "test_*.py"
